@@ -1,0 +1,115 @@
+// Ogbonna Memorial — Prisma Schema
+// Database: PostgreSQL (Supabase)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+}
+
+enum DeliveryOption {
+  PICKUP        // Collect from host — no delivery fee
+  LAGOS
+  ABUJA
+  PORT_HARCOURT
+  ENUGU
+  ONITSHA
+  OTHER
+}
+
+// ─── Order ────────────────────────────────────────────────────────────────────
+
+model Order {
+  id              String         @id @default(cuid())
+
+  // Buyer info
+  fullName        String
+  email           String
+  phone           String
+  whatsapp        String?
+
+  // Order details
+  quantity        Int            @default(1)
+  unitPrice       Float          @default(100)   // GBP
+  totalPrice      Float                           // unitPrice * quantity + deliveryFee
+
+  deliveryOption  DeliveryOption @default(PICKUP)
+  deliveryAddress String?        // Required when deliveryOption != PICKUP
+  deliveryState   String?
+
+  // Payment
+  paymentRef      String?        @unique          // Buyer-supplied bank-transfer reference
+  receiptUrl      String?                         // Cloudinary URL — set after upload
+  status          OrderStatus    @default(PENDING)
+
+  // Relations — attendeeId is optional: someone can order without registering as an attendee
+  attendeeId      String?
+  attendee        Attendee?      @relation(fields: [attendeeId], references: [id])
+  transactions    Transaction[]
+
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@map("orders")
+}
+
+// ─── Attendee ─────────────────────────────────────────────────────────────────
+// Represents a person registering to attend the memorial event.
+// An attendee can have multiple orders (e.g. buys for themselves and family)
+// and multiple transactions (payment attempts).
+
+model Attendee {
+  id              String        @id @default(uuid())
+  firstName       String
+  lastName        String
+  email           String        @unique
+  dob             DateTime
+  city            String
+  state           String
+  country         String
+  deliveryAddress String
+  createdAt       DateTime      @default(now())
+
+  orders          Order[]
+  transactions    Transaction[]
+
+  @@map("attendees")
+}
+
+// ─── Transaction ──────────────────────────────────────────────────────────────
+// Holds payment records.
+// Tied to both an Attendee and (optionally) an Order.
+// Pre-shaped for Paystack integration:
+//   - reference → Paystack transaction reference
+//   - status    → driven by Paystack webhook events once live
+
+model Transaction {
+  id          String    @id @default(uuid())
+
+  attendeeId  String
+  attendee    Attendee  @relation(fields: [attendeeId], references: [id])
+
+  orderId     String?
+  order       Order?    @relation(fields: [orderId], references: [id])
+
+  amount      Float
+  currency    String    @default("NGN")
+  reference   String    @unique
+  status      String    @default("PENDING") // PENDING | SUCCESS | FAILED
+
+  receiptUrl  String?   // Cloudinary URL stored on the transaction too
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("transactions")
+}
