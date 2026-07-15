@@ -1,11 +1,12 @@
-/** Map common provider aliases to real SMTP hostnames. */
+/** Map common provider aliases to real SMTP hostnames (legacy SMTP only). */
 function resolveSmtpHost(raw?: string): string {
   const host = raw?.trim();
-  if (!host) return 'smtp.gmail.com';
+  if (!host) return 'smtp.resend.com';
 
   const aliases: Record<string, string> = {
     gmail: 'smtp.gmail.com',
     google: 'smtp.gmail.com',
+    resend: 'smtp.resend.com',
     outlook: 'smtp.office365.com',
     hotmail: 'smtp.office365.com',
     office365: 'smtp.office365.com',
@@ -19,7 +20,6 @@ export default () => ({
   nodeEnv: process.env.NODE_ENV || 'development',
   backendUrl:
     process.env.BACKEND_URL || `http://localhost:${process.env.PORT || '3001'}`,
-  /** Client portal base URL for deep links in emails (e.g. https://client.ogbonnasmemorial.com). No trailing slash. */
   clientAppBaseUrl:
     process.env.CLIENT_APP_BASE_URL ||
     process.env.FRONTEND_URL ||
@@ -43,22 +43,27 @@ export default () => ({
   logging: {
     level: process.env.LOG_LEVEL || 'info',
   },
-  /** Min ms between any two emails (global throttle). Use to avoid SMTP rate limit (e.g. Microsoft 365 450 4.5.127).
-   * Default: 10000ms (10 seconds) for Microsoft 365 compatibility. Increase if still hitting rate limits. */
-  mailThrottleMs: parseInt(process.env.MAIL_THROTTLE_MS || '10000', 10),
+  mailThrottleMs: parseInt(process.env.MAIL_THROTTLE_MS || '500', 10),
   email: {
-    // Prefer SMTP_*; fall back to MAIL_* used elsewhere in the app
-    host: resolveSmtpHost(process.env.SMTP_HOST || process.env.MAIL_HOST),
-    port: process.env.SMTP_PORT || process.env.MAIL_PORT || '587',
-    secure: process.env.SMTP_SECURE || process.env.MAIL_SECURE || 'false',
-    user: process.env.SMTP_USER || process.env.MAIL_USER,
-    password: process.env.SMTP_PASS || process.env.MAIL_PASSWORD,
+    /** Primary: Resend HTTP API (used by MailService) */
+    resendApiKey: process.env.RESEND_API_KEY || process.env.SMTP_PASS,
     from:
+      process.env.EMAIL_FROM ||
+      process.env.RESEND_FROM ||
       process.env.SMTP_FROM ||
       process.env.MAIL_FROM ||
-      'noreply@ogbonnasmemorial.com',
+      'Ogbonna Memorial <info@ogbonnasmemorial.com>',
     fromName: process.env.SMTP_FROM_NAME || 'Ogbonnas Memorial',
-    replyTo: process.env.SMTP_REPLY_TO,
+    fromAddress:
+      process.env.EMAIL_FROM_ADDRESS || 'info@ogbonnasmemorial.com',
+    replyTo: process.env.SMTP_REPLY_TO || process.env.EMAIL_REPLY_TO,
+
+    /** Legacy SMTP fields (kept for backwards compatibility) */
+    host: resolveSmtpHost(process.env.SMTP_HOST || process.env.MAIL_HOST),
+    port: process.env.SMTP_PORT || process.env.MAIL_PORT || '465',
+    secure: process.env.SMTP_SECURE || process.env.MAIL_SECURE || 'true',
+    user: process.env.SMTP_USER || process.env.MAIL_USER,
+    password: process.env.SMTP_PASS || process.env.MAIL_PASSWORD,
   },
   google: {
     clientId: process.env.GOOGLE_CLIENT_ID,
