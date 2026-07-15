@@ -4,6 +4,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ServeStaticModule } from '@nestjs/serve-static';
+import { existsSync } from 'fs';
 import { join } from 'path';
 
 import { AppController } from './app.controller.js';
@@ -16,7 +17,12 @@ import { UsersModule } from './users/users.module.js';
 import configuration from './config/configuration.js';
 import { AdminModule } from './admin/admin.module.js';
 
-const publicPath = join(__dirname, '..', 'public');
+// Nest compiles to dist/src — public may live next to dist or at package root
+const publicCandidates = [
+  join(__dirname, '..', 'public'),
+  join(__dirname, '..', '..', 'public'),
+];
+const publicPath = publicCandidates.find(p => existsSync(p));
 
 @Module({
   imports: [
@@ -25,10 +31,14 @@ const publicPath = join(__dirname, '..', 'public');
       isGlobal: true,
       load: [configuration],
     }),
-    ServeStaticModule.forRoot({
-      rootPath: publicPath,
-      serveRoot: '/assets',
-    }),
+    ...(publicPath
+      ? [
+          ServeStaticModule.forRoot({
+            rootPath: publicPath,
+            serveRoot: '/assets',
+          }),
+        ]
+      : []),
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
