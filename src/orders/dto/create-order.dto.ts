@@ -12,7 +12,10 @@ import { DeliveryOption } from '@prisma/client';
 
 export class CreateOrderDto {
   @IsString()
-  fullName: string;
+  firstName: string;
+
+  @IsString()
+  lastName: string;
 
   @IsEmail()
   email: string;

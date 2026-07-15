@@ -4,7 +4,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { PrismaService } from '../database/prisma.service.js';
+import { DatabaseService } from '../database/database.service.js';
 import { UploadService } from '../upload/upload.service.js';
 import { CreateOrderDto } from './dto/create-order.dto.js';
 import { DeliveryOption, OrderStatus } from '@prisma/client';
@@ -36,7 +36,7 @@ export class OrdersService {
   private readonly mailer: nodemailer.Transporter;
 
   constructor(
-    private readonly prisma:  PrismaService,
+    private readonly prisma:  DatabaseService,
     private readonly upload:  UploadService,
   ) {
     this.mailer = nodemailer.createTransport({
@@ -54,7 +54,7 @@ export class OrdersService {
 
   async create(dto: CreateOrderDto) {
     if (dto.paymentRef) {
-      const existing = await this.prisma.order.findUnique({
+      const existing = await this.prisma.orders.findUnique({
         where: { paymentRef: dto.paymentRef },
       });
       if (existing) {
@@ -65,23 +65,21 @@ export class OrdersService {
     const deliveryFee = DELIVERY_FEES[dto.deliveryOption] ?? 0;
     const totalPrice  = dto.quantity * UNIT_PRICE_GBP + deliveryFee;
 
-    // Upsert Attendee by email so re-orders are linked to the same record
-    const [firstName, ...rest] = dto.fullName.trim().split(' ');
-    const lastName = rest.join(' ') || firstName;
+    // Compose fullName for the orders table from the two separate fields
+    const firstName = dto.firstName.trim();
+    const lastName  = dto.lastName.trim();
+    const fullName  = `${firstName} ${lastName}`;
 
     try {
-      // Create or update the attendee record
-      const attendee = await this.prisma.attendee.upsert({
+      const attendee = await this.prisma.attendees.upsert({
         where:  { email: dto.email },
-        update: {
-          firstName,
-          lastName,
-        },
+        update: { firstName, lastName },
         create: {
+          id:              randomUUID(),
           firstName,
           lastName,
           email:           dto.email,
-          dob:             new Date('1900-01-01'), // placeholder — no DOB in order form
+          dob:             new Date('1900-01-01'),
           city:            '',
           state:           dto.deliveryState  ?? '',
           country:         'Nigeria',
@@ -89,9 +87,10 @@ export class OrdersService {
         },
       });
 
-      const order = await this.prisma.order.create({
+      const order = await this.prisma.orders.create({
         data: {
-          fullName:        dto.fullName,
+          id:              randomUUID(),
+          fullName,
           email:           dto.email,
           phone:           dto.phone,
           whatsapp:        dto.whatsapp,
@@ -103,6 +102,7 @@ export class OrdersService {
           deliveryState:   dto.deliveryState,
           paymentRef:      dto.paymentRef,
           attendeeId:      attendee.id,
+          updatedAt:       new Date(),
         },
       });
 
@@ -132,16 +132,15 @@ export class OrdersService {
     mimetype: string;
     filename: string;
   }) {
-    const order = await this.prisma.order.findUnique({
+    const order = await this.prisma.orders.findUnique({
       where:   { id: params.orderId },
-      include: { attendee: true },
+      include: { attendees: true },
     });
 
     if (!order) {
       throw new NotFoundException(`Order ${params.orderId} not found.`);
     }
 
-    // Upload file to Cloudinary — returns secure public URL
     const receiptUrl = await this.upload.uploadReceipt({
       buffer:   params.buffer,
       mimetype: params.mimetype,
@@ -150,20 +149,16 @@ export class OrdersService {
       fullName: order.fullName,
     });
 
-    // Persist the Drive URL and mark the order as CONFIRMED
-    const updated = await this.prisma.order.update({
+    const updated = await this.prisma.orders.update({
       where: { id: params.orderId },
-      data:  {
-        receiptUrl,
-        status: OrderStatus.CONFIRMED,
-      },
-      include: { attendee: true },
+      data:  { receiptUrl, status: OrderStatus.CONFIRMED },
+      include: { attendees: true },
     });
 
-    // Create a Transaction record tied to both attendee and order
     if (order.attendeeId) {
-      await this.prisma.transaction.create({
+      await this.prisma.transactions.create({
         data: {
+          id:         randomUUID(),
           attendeeId: order.attendeeId,
           orderId:    order.id,
           amount:     order.totalPrice,
@@ -171,6 +166,7 @@ export class OrdersService {
           reference:  order.paymentRef ?? `REF-${randomUUID()}`,
           status:     'SUCCESS',
           receiptUrl,
+          updatedAt:  new Date(),
         },
       });
     }
@@ -191,16 +187,16 @@ export class OrdersService {
   // ── Queries ─────────────────────────────────────────────────────────────────
 
   async findAll() {
-    return this.prisma.order.findMany({
+    return this.prisma.orders.findMany({
       orderBy: { createdAt: 'desc' },
-      include: { attendee: true, transactions: true },
+      include: { attendees: true, transactions: true },
     });
   }
 
   async findOne(id: string) {
-    return this.prisma.order.findUnique({
+    return this.prisma.orders.findUnique({
       where:   { id },
-      include: { attendee: true, transactions: true },
+      include: { attendees: true, transactions: true },
     });
   }
 
