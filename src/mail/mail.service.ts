@@ -1,115 +1,75 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Resend } from 'resend';
 import { MailOptions } from './interfaces/mail.interface.js';
 import { TemplateService } from './templates/template.service.js';
 import { EmailTemplate } from './constants/template-names.js';
 
-/** Soft throttle between sends (Resend rate limits are higher than SMTP) */
-const MAIL_THROTTLE_MS = 500;
-const MAX_RETRY_ATTEMPTS = 5;
-const BASE_RETRY_DELAY_MS = 2000;
+const RESEND_API_URL = 'https://api.resend.com/emails';
+const MAX_RETRY_ATTEMPTS = 3;
+const BASE_RETRY_DELAY_MS = 750;
 
 const delay = (ms: number) =>
   new Promise<void>(resolve => setTimeout(resolve, ms));
 
-function isRateLimitError(error: unknown): boolean {
-  if (!error) return false;
-  let errorMessage: string;
-  if (error instanceof Error) {
-    errorMessage = error.message;
-  } else if (typeof error === 'string') {
-    errorMessage = error;
-  } else if (error && typeof error === 'object' && 'message' in error) {
-    errorMessage = String((error as { message: unknown }).message);
-  } else {
-    errorMessage = JSON.stringify(error);
-  }
-  const status =
-    error && typeof error === 'object' && 'statusCode' in error
-      ? Number((error as { statusCode: unknown }).statusCode)
-      : undefined;
+function isTransientError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : JSON.stringify(error);
 
   return (
-    status === 429 ||
-    errorMessage.includes('429') ||
-    errorMessage.includes('rate_limit') ||
-    errorMessage.includes('rate limit') ||
-    errorMessage.includes('too many') ||
-    errorMessage.includes('throttle')
+    message.includes('Unable to fetch data') ||
+    message.includes('could not be resolved') ||
+    message.includes('fetch failed') ||
+    message.includes('ECONNRESET') ||
+    message.includes('ETIMEDOUT') ||
+    message.includes('ENOTFOUND') ||
+    message.includes('socket hang up') ||
+    message.includes('429') ||
+    message.includes('rate_limit') ||
+    message.includes('502') ||
+    message.includes('503') ||
+    message.includes('504')
   );
 }
 
-type ResendAttachment = {
+type ResendApiAttachment = {
   filename: string;
-  content: Buffer | string;
-  contentId?: string;
-  contentType?: string;
+  content: string;
+  content_id?: string;
+  content_type?: string;
 };
 
 /**
- * Mail Service — sends via Resend HTTP API (works on Vercel serverless).
+ * Mail Service — Resend HTTP API via native fetch (Vercel-safe).
+ *
+ * Do not fire-and-forget on serverless: await sends (or allSettled) before
+ * returning the HTTP response, or Vercel may freeze the isolate mid-request.
  */
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
-  private readonly resend: Resend;
-  private lastSentAt = 0;
-  private sendQueue: Promise<void> = Promise.resolve();
-  private currentThrottleMs: number;
-  private consecutiveRateLimitErrors = 0;
+  private readonly apiKey: string;
 
   constructor(
     private configService: ConfigService,
     private templateService: TemplateService,
   ) {
-    const apiKey = this.configService.get<string>('email.resendApiKey');
-    if (!apiKey) {
+    this.apiKey =
+      this.configService.get<string>('email.resendApiKey')?.trim() ||
+      process.env.RESEND_API_KEY?.trim() ||
+      '';
+
+    if (!this.apiKey) {
       this.logger.error(
-        'RESEND_API_KEY is not set — emails will fail until it is configured',
+        'RESEND_API_KEY is not set — emails will fail until configured on this environment',
       );
     } else {
-      this.logger.log('Resend mail client initialized');
-    }
-
-    this.resend = new Resend(apiKey || 'missing-resend-api-key');
-    this.currentThrottleMs =
-      Number(this.configService.get('mailThrottleMs')) || MAIL_THROTTLE_MS;
-  }
-
-  private async waitForThrottle(): Promise<void> {
-    const now = Date.now();
-    const elapsed = now - this.lastSentAt;
-    if (elapsed < this.currentThrottleMs && this.lastSentAt > 0) {
-      await delay(this.currentThrottleMs - elapsed);
-    }
-  }
-
-  private adjustThrottle(rateLimitHit: boolean): void {
-    const baseThrottle =
-      Number(this.configService.get('mailThrottleMs')) || MAIL_THROTTLE_MS;
-    const maxThrottle = baseThrottle * 8;
-
-    if (rateLimitHit) {
-      this.consecutiveRateLimitErrors++;
-      this.currentThrottleMs = Math.min(
-        baseThrottle * Math.pow(2, this.consecutiveRateLimitErrors),
-        maxThrottle,
+      this.logger.log(
+        `Resend ready (key=${this.apiKey.slice(0, 6)}…, from=${this.resolveFromAddress()})`,
       );
-      this.logger.warn(
-        `Rate limit detected. Throttle → ${this.currentThrottleMs}ms`,
-      );
-    } else if (this.consecutiveRateLimitErrors > 0) {
-      this.consecutiveRateLimitErrors = Math.max(
-        0,
-        this.consecutiveRateLimitErrors - 1,
-      );
-      this.currentThrottleMs = Math.max(
-        baseThrottle,
-        this.currentThrottleMs * 0.75,
-      );
-    } else {
-      this.currentThrottleMs = baseThrottle;
     }
   }
 
@@ -127,34 +87,37 @@ export class MailService {
     return name ? `${name} <${address}>` : address;
   }
 
+  private toBase64Content(content: string | Buffer): string {
+    return Buffer.isBuffer(content)
+      ? content.toString('base64')
+      : Buffer.from(content).toString('base64');
+  }
+
   private toAttachmentPayload(
     items: NonNullable<MailOptions['attachments']>,
-  ): ResendAttachment[] {
-    const out: ResendAttachment[] = [];
+  ): ResendApiAttachment[] {
+    const out: ResendApiAttachment[] = [];
 
     for (const a of items) {
       if (a.content == null) {
         this.logger.warn(
-          `Skipping attachment "${a.filename}" — only Buffer/string content is supported with Resend`,
+          `Skipping attachment "${a.filename}" — only Buffer/string content is supported`,
         );
         continue;
       }
 
       out.push({
         filename: a.filename,
-        content: a.content,
-        ...(a.contentType ? { contentType: a.contentType } : {}),
-        ...(a.cid ? { contentId: a.cid } : {}),
+        content: this.toBase64Content(a.content),
+        ...(a.contentType ? { content_type: a.contentType } : {}),
+        ...(a.cid ? { content_id: a.cid } : {}),
       });
     }
 
     return out;
   }
 
-  /**
-   * Send email with template support
-   */
-  async sendMail(options: MailOptions): Promise<void> {
+  private buildPayload(options: MailOptions) {
     const {
       to,
       subject,
@@ -223,94 +186,126 @@ export class MailService {
     const resendAttachments =
       allAttachments.length > 0
         ? this.toAttachmentPayload(allAttachments)
-        : undefined;
+        : [];
 
     const recipientList = Array.isArray(to) ? to : [to];
-    const recipient = recipientList.join(', ');
 
-    const payload = {
-      from: this.resolveFromAddress(from),
-      to: recipientList,
-      subject: emailSubject,
-      html: emailHtml,
-      text: plainText,
-      replyTo:
-        replyToOverride ||
-        this.configService.get<string>('email.replyTo') ||
-        undefined,
-      cc: cc ? (Array.isArray(cc) ? cc : [cc]) : undefined,
-      bcc: bcc ? (Array.isArray(bcc) ? bcc : [bcc]) : undefined,
-      attachments:
-        resendAttachments && resendAttachments.length > 0
-          ? resendAttachments
-          : undefined,
+    return {
+      recipient: recipientList.join(', '),
+      body: {
+        from: this.resolveFromAddress(from),
+        to: recipientList,
+        subject: emailSubject,
+        ...(emailHtml ? { html: emailHtml } : {}),
+        ...(plainText ? { text: plainText } : {}),
+        ...(replyToOverride || this.configService.get<string>('email.replyTo')
+          ? {
+              reply_to:
+                replyToOverride ||
+                this.configService.get<string>('email.replyTo'),
+            }
+          : {}),
+        ...(cc
+          ? { cc: Array.isArray(cc) ? cc : [cc] }
+          : {}),
+        ...(bcc
+          ? { bcc: Array.isArray(bcc) ? bcc : [bcc] }
+          : {}),
+        ...(resendAttachments.length > 0
+          ? { attachments: resendAttachments }
+          : {}),
+      },
     };
+  }
 
-    const doSend = async (): Promise<void> => {
-      await this.waitForThrottle();
+  private async postToResend(
+    body: Record<string, unknown>,
+  ): Promise<{ id?: string }> {
+    if (!this.apiKey) {
+      throw new Error('RESEND_API_KEY is not configured');
+    }
 
-      let lastError: Error | null = null;
-      let attempt = 0;
-
-      while (attempt < MAX_RETRY_ATTEMPTS) {
-        attempt++;
-        try {
-          const { data: result, error } = await this.resend.emails.send(
-            payload as Parameters<Resend['emails']['send']>[0],
-          );
-
-          if (error) {
-            throw Object.assign(new Error(error.message), {
-              statusCode: (error as { statusCode?: number }).statusCode,
-              name: error.name,
-            });
-          }
-
-          this.lastSentAt = Date.now();
-          this.logger.log(
-            `Email sent to ${recipient}: ${result?.id ?? 'ok'}`,
-          );
-          this.adjustThrottle(false);
-          return;
-        } catch (error) {
-          lastError =
-            error instanceof Error ? error : new Error(String(error));
-          const isRateLimit = isRateLimitError(error);
-
-          this.logger.error(
-            `Email send attempt ${attempt}/${MAX_RETRY_ATTEMPTS} failed for ${recipient}: ${lastError.message}`,
-          );
-
-          if (isRateLimit && attempt < MAX_RETRY_ATTEMPTS) {
-            const backoffDelay = BASE_RETRY_DELAY_MS * Math.pow(2, attempt - 1);
-            this.logger.warn(
-              `Rate limited — retrying in ${backoffDelay}ms (attempt ${attempt}/${MAX_RETRY_ATTEMPTS})`,
-            );
-            this.adjustThrottle(true);
-            await delay(backoffDelay);
-            await this.waitForThrottle();
-            continue;
-          }
-
-          throw new Error(`Failed to send email: ${lastError.message}`);
-        }
-      }
-
-      if (lastError) {
-        throw new Error(
-          `Failed to send email after ${MAX_RETRY_ATTEMPTS} attempts: ${lastError.message}`,
-        );
-      }
-    };
-
-    const ourSend = this.sendQueue.then(doSend);
-    this.sendQueue = ourSend.catch(error => {
-      this.logger.error(
-        `Email queue error: ${error instanceof Error ? error.message : String(error)}`,
+    let response: Response;
+    try {
+      response = await fetch(RESEND_API_URL, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Unable to reach Resend API (${message}). Check outbound network / DNS on this host.`,
       );
-      throw error;
-    });
-    await ourSend;
+    }
+
+    const raw = await response.text();
+    let parsed: { id?: string; message?: string; name?: string } = {};
+    try {
+      parsed = raw ? (JSON.parse(raw) as typeof parsed) : {};
+    } catch {
+      parsed = { message: raw || response.statusText };
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        parsed.message ||
+          `Resend HTTP ${response.status}: ${raw || response.statusText}`,
+      );
+    }
+
+    return parsed;
+  }
+
+  /**
+   * Send email. Throws on failure after retries.
+   * Prefer await / allSettled on serverless — do not detach the promise.
+   */
+  async sendMail(options: MailOptions): Promise<void> {
+    const { recipient, body } = this.buildPayload(options);
+
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
+      try {
+        const result = await this.postToResend(body);
+        this.logger.log(`Email sent to ${recipient}: ${result.id ?? 'ok'}`);
+        return;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        this.logger.error(
+          `Email send attempt ${attempt}/${MAX_RETRY_ATTEMPTS} failed for ${recipient}: ${lastError.message}`,
+        );
+
+        if (isTransientError(error) && attempt < MAX_RETRY_ATTEMPTS) {
+          await delay(BASE_RETRY_DELAY_MS * attempt);
+          continue;
+        }
+        break;
+      }
+    }
+
+    throw new Error(
+      `Failed to send email: ${lastError?.message ?? 'unknown error'}`,
+    );
+  }
+
+  /**
+   * Best-effort send — never throws. Safe for background side-effects when awaited via allSettled.
+   */
+  async sendMailSafe(options: MailOptions): Promise<boolean> {
+    try {
+      await this.sendMail(options);
+      return true;
+    } catch (error) {
+      this.logger.error(
+        `Email suppressed failure: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
   }
 
   async sendOtpEmail(
@@ -536,16 +531,12 @@ export class MailService {
     });
   }
 
-  /** Lightweight startup check — Resend has no SMTP verify() */
   async verifyConnection(): Promise<boolean> {
-    const apiKey = this.configService.get<string>('email.resendApiKey');
-    if (!apiKey) {
+    if (!this.apiKey) {
       this.logger.error('Resend not configured: RESEND_API_KEY is missing');
       return false;
     }
-    this.logger.log(
-      `Resend ready (from: ${this.resolveFromAddress()})`,
-    );
+    this.logger.log(`Resend configured (from: ${this.resolveFromAddress()})`);
     return true;
   }
 }

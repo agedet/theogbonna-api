@@ -95,8 +95,11 @@ export class OrdersService {
         },
       });
 
-      this.sendOrderReceivedEmail(order).catch(console.error);
-      this.sendAdminOrderEmail(order).catch(console.error);
+      // Await emails before returning — fire-and-forget gets killed on Vercel
+      await Promise.allSettled([
+        this.sendOrderReceivedEmail(order),
+        this.sendAdminOrderEmail(order),
+      ]);
 
       return {
         id:          order.id,
@@ -161,9 +164,11 @@ export class OrdersService {
       });
     }
 
-    // Emails — fire and forget
-    this.sendReceiptConfirmationEmail(updated, receiptUrl).catch(console.error);
-    this.sendHostReceiptEmail(updated, receiptUrl).catch(console.error);
+    // Await emails before returning — fire-and-forget gets killed on Vercel
+    await Promise.allSettled([
+      this.sendReceiptConfirmationEmail(updated, receiptUrl),
+      this.sendHostReceiptEmail(updated, receiptUrl),
+    ]);
 
     return {
       orderId:    updated.id,
@@ -231,7 +236,7 @@ export class OrdersService {
     quantity: number; totalPrice: number;
     deliveryOption: delivery_option; paymentRef: string | null;
   }) {
-    await this.mail.sendMail({
+    await this.mail.sendMailSafe({
       to:      order.email,
       subject: 'Ogbonna Memorial — Asoebi Order Received',
       html: `
@@ -263,7 +268,10 @@ export class OrdersService {
     quantity: number; totalPrice: number;
     deliveryOption: delivery_option; paymentRef: string | null;
   }) {
-    await this.mail.sendMail({
+    if (!HOST_EMAIL) {
+      return;
+    }
+    await this.mail.sendMailSafe({
       to:      HOST_EMAIL,
       subject: `New Asoebi Order — ${order.fullName}`,
       html: `
@@ -288,7 +296,7 @@ export class OrdersService {
     quantity: number; totalPrice: number;
     deliveryOption: delivery_option;
   }, receiptUrl: string) {
-    await this.mail.sendMail({
+    await this.mail.sendMailSafe({
       to:      order.email,
       subject: 'Ogbonna Memorial — Receipt Received, Order Being Verified',
       html: `
@@ -305,7 +313,7 @@ export class OrdersService {
           <p style="background:#dcfce7;padding:12px;border-radius:8px;color:#166534">
             Your order is now <b>being verified</b>. We will contact you once payment is confirmed and your materials are ready.
           </p>
-          <p style="color:#64748b;font-size:13px">For enquiries reply to this email or WhatsApp +2347065606131.</p>
+          <p style="color:#64748b;font-size:13px">For enquiries reply to this email or <a href="https://wa.me/447958198281" style="color:#2563eb;text-decoration:underline">WhatsApp</a>.</p>
         </div>`,
     });
   }
@@ -318,7 +326,10 @@ export class OrdersService {
     deliveryAddress: string | null; deliveryState: string | null;
     paymentRef: string | null;
   }, receiptUrl: string) {
-    await this.mail.sendMail({
+    if (!HOST_EMAIL) {
+      return;
+    }
+    await this.mail.sendMailSafe({
       to:      HOST_EMAIL,
       subject: `🧾 Receipt Uploaded — ${order.fullName} (Order ${order.id})`,
       html: `
