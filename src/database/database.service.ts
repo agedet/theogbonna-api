@@ -44,8 +44,10 @@ export class DatabaseService
       await this.$connect();
       this.logger.log('Database connection established successfully');
 
-      // Set up connection health monitoring
-      this.setupConnectionMonitoring();
+      // Long-lived interval is pointless on serverless (Vercel sets VERCEL=1)
+      if (!process.env.VERCEL) {
+        this.setupConnectionMonitoring();
+      }
     } catch (error) {
       this.logger.error(
         'Failed to connect to database',

@@ -1,9 +1,25 @@
+/** Map common provider aliases to real SMTP hostnames. */
+function resolveSmtpHost(raw?: string): string {
+  const host = raw?.trim();
+  if (!host) return 'smtp.gmail.com';
+
+  const aliases: Record<string, string> = {
+    gmail: 'smtp.gmail.com',
+    google: 'smtp.gmail.com',
+    outlook: 'smtp.office365.com',
+    hotmail: 'smtp.office365.com',
+    office365: 'smtp.office365.com',
+  };
+
+  return aliases[host.toLowerCase()] ?? host;
+}
+
 export default () => ({
   port: parseInt(process.env.PORT || '3001', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   backendUrl:
     process.env.BACKEND_URL || `http://localhost:${process.env.PORT || '3001'}`,
-  /** Client portal base URL for deep links in emails (e.g. https://client.bwana.com). No trailing slash. */
+  /** Client portal base URL for deep links in emails (e.g. https://client.ogbonnasmemorial.com). No trailing slash. */
   clientAppBaseUrl:
     process.env.CLIENT_APP_BASE_URL ||
     process.env.FRONTEND_URL ||
@@ -31,13 +47,17 @@ export default () => ({
    * Default: 10000ms (10 seconds) for Microsoft 365 compatibility. Increase if still hitting rate limits. */
   mailThrottleMs: parseInt(process.env.MAIL_THROTTLE_MS || '10000', 10),
   email: {
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: process.env.SMTP_PORT || '587',
-    secure: process.env.SMTP_SECURE || 'false',
-    user: process.env.SMTP_USER,
-    password: process.env.SMTP_PASS,
-    from: process.env.SMTP_FROM || 'noreply@example.com',
-    fromName: process.env.SMTP_FROM_NAME || 'Bwana',
+    // Prefer SMTP_*; fall back to MAIL_* used elsewhere in the app
+    host: resolveSmtpHost(process.env.SMTP_HOST || process.env.MAIL_HOST),
+    port: process.env.SMTP_PORT || process.env.MAIL_PORT || '587',
+    secure: process.env.SMTP_SECURE || process.env.MAIL_SECURE || 'false',
+    user: process.env.SMTP_USER || process.env.MAIL_USER,
+    password: process.env.SMTP_PASS || process.env.MAIL_PASSWORD,
+    from:
+      process.env.SMTP_FROM ||
+      process.env.MAIL_FROM ||
+      'noreply@ogbonnasmemorial.com',
+    fromName: process.env.SMTP_FROM_NAME || 'Ogbonnas Memorial',
     replyTo: process.env.SMTP_REPLY_TO,
   },
   google: {
@@ -45,6 +65,5 @@ export default () => ({
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
     callbackUrl: process.env.GOOGLE_CALLBACK_URL,
     calendarApiKey: process.env.GOOGLE_CALENDAR_API_KEY,
-    // holidayCalendarId: resolveGoogleHolidayCalendarId(),
   },
 });
