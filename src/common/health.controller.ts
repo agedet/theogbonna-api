@@ -1,6 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
-import { DatabaseService } from 'src/database/database.service';
+import { DatabaseService } from '../database/database.service.js';
 
 @ApiTags('Health')
 @Controller('health')
@@ -29,7 +29,7 @@ export class HealthController {
         uptime: process.uptime(),
         database: 'disconnected',
         environment: process.env.NODE_ENV || 'development',
-        error: error.message,
+        error: error instanceof Error ? error.message : String(error),
       };
     }
   }

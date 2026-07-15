@@ -13,7 +13,7 @@ import { ConfigService } from '@nestjs/config';
 import { LocalAuthGuard } from './guards/local-auth.guard';
 import { VerifyForgotPasswordOtpDto } from './dto/verify-forgot-password-otp.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
-import { CurrentUser } from 'src/common/decorators/current-user.dto';
+import { CurrentUser } from '../common/decorators/current-user.dto.js';
 
 @ApiTags('Authentication')
 @Controller('auth')

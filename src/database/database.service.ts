@@ -4,9 +4,15 @@ import {
   OnModuleDestroy,
   HttpException,
 } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
-import { LoggerService } from '../common/services/logger.service';
-import { DatabaseException } from 'src/common/exceptions/database.exceptions';
+import { Prisma, PrismaClient } from '@prisma/client';
+import { LoggerService } from '../common/services/logger.service.js';
+import { DatabaseException } from '../common/exceptions/database.exceptions.js';
+
+/** Interactive transaction client (no connection / nesting helpers). */
+type PrismaTransactionClient = Omit<
+  PrismaClient,
+  '$connect' | '$disconnect' | '$on' | '$transaction' | '$extends'
+>;
 
 @Injectable()
 export class DatabaseService
@@ -159,21 +165,22 @@ export class DatabaseService
       }
 
       // Handle specific Prisma errors
-      const errorCode = error?.code;
-      if (errorCode === 'P2002') {
-        throw new DatabaseException('Duplicate entry found', 409);
-      }
-      if (errorCode === 'P2025') {
-        throw new DatabaseException('Record not found', 404);
-      }
-      if (errorCode === 'P2003') {
-        throw new DatabaseException('Foreign key constraint failed', 400);
-      }
-      if (errorCode === 'P1001' || errorCode === 'P1002') {
-        throw new DatabaseException(
-          'Database connection failed. Please try again.',
-          503,
-        );
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2002') {
+          throw new DatabaseException('Duplicate entry found', 409);
+        }
+        if (error.code === 'P2025') {
+          throw new DatabaseException('Record not found', 404);
+        }
+        if (error.code === 'P2003') {
+          throw new DatabaseException('Foreign key constraint failed', 400);
+        }
+        if (error.code === 'P1001' || error.code === 'P1002') {
+          throw new DatabaseException(
+            'Database connection failed. Please try again.',
+            503,
+          );
+        }
       }
 
       throw new DatabaseException(`Database operation failed: ${operation}`);
@@ -182,12 +189,12 @@ export class DatabaseService
 
   // Transaction wrapper with error handling
   async transaction<T>(
-    fn: (prisma: PrismaClient) => Promise<T>,
+    fn: (prisma: PrismaTransactionClient) => Promise<T>,
     timeout: number = 30000, // Increased default timeout to 30 seconds
   ): Promise<T> {
     try {
       this.logger.debug('Starting database transaction');
-      
+
       const result = await this.$transaction(fn, {
         timeout: timeout, // 30 seconds default timeout (increased from 10)
         maxWait: parseInt(process.env.DATABASE_MAX_WAIT || '15000', 10), // 15 seconds max wait (increased from 5)
