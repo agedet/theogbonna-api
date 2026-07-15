@@ -48,7 +48,7 @@ function isRateLimitError(error: unknown): boolean {
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
-  private transporter: nodemailer.Transporter;
+  private transporter!: nodemailer.Transporter;
   private lastSentAt = 0;
   private sendQueue: Promise<void> = Promise.resolve();
   private currentThrottleMs: number;
