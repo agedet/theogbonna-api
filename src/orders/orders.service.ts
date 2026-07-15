@@ -7,7 +7,7 @@ import {
 import { DatabaseService } from '../database/database.service.js';
 import { UploadService } from '../upload/upload.service.js';
 import { CreateOrderDto } from './dto/create-order.dto.js';
-import { DeliveryOption, OrderStatus } from '@prisma/client';
+import { delivery_option, order_status } from '@prisma/client';
 import * as nodemailer from 'nodemailer';
 import { randomUUID } from 'crypto';
 
@@ -16,18 +16,18 @@ const HOST_PHONE     = '2347065606131'; // WhatsApp host number (no +)
 const HOST_EMAIL     = process.env.HOST_EMAIL ?? process.env.MAIL_USER ?? '';
 
 /** Flat delivery surcharges in GBP */
-const DELIVERY_FEES: Record<DeliveryOption, number> = {
-  [DeliveryOption.PICKUP]: 0,
-  [DeliveryOption.LAGOS]:  10,
-  [DeliveryOption.ABUJA]:  10,
-  [DeliveryOption.PORT_HARCOURT]: 6,
-  [DeliveryOption.ENUGU]:  6,
-  [DeliveryOption.ONITSHA]: 6,
-  [DeliveryOption.OTHER]:  10,
+const DELIVERY_FEES: Record<delivery_option, number> = {
+  [delivery_option.PICKUP]: 0,
+  [delivery_option.LAGOS]:  10,
+  [delivery_option.ABUJA]:  10,
+  [delivery_option.PORT_HARCOURT]: 6,
+  [delivery_option.ENUGU]:  6,
+  [delivery_option.ONITSHA]: 6,
+  [delivery_option.OTHER]:  10,
 };
 
-function deliveryLabel(opt: DeliveryOption): string {
-  if (opt === DeliveryOption.PICKUP) return 'Will Pickup (no delivery fee)';
+function deliveryLabel(opt: delivery_option): string {
+  if (opt === delivery_option.PICKUP) return 'Will Pickup (no delivery fee)';
   return opt.replace(/_/g, ' ');
 }
 
@@ -151,7 +151,8 @@ export class OrdersService {
 
     const updated = await this.prisma.orders.update({
       where: { id: params.orderId },
-      data:  { receiptUrl, status: OrderStatus.CONFIRMED },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      data:  { receiptUrl, status: 'payment_proof_received' as any },
       include: { attendees: true },
     });
 
@@ -209,7 +210,7 @@ export class OrdersService {
     phone:          string;
     quantity:       number;
     totalPrice:     number;
-    deliveryOption: DeliveryOption;
+    deliveryOption: delivery_option;
     deliveryAddress: string | null;
     deliveryState:  string | null;
     paymentRef:     string | null;
@@ -239,7 +240,7 @@ export class OrdersService {
   private async sendOrderReceivedEmail(order: {
     id: string; fullName: string; email: string;
     quantity: number; totalPrice: number;
-    deliveryOption: DeliveryOption; paymentRef: string | null;
+    deliveryOption: delivery_option; paymentRef: string | null;
   }) {
     await this.mailer.sendMail({
       from:    process.env.MAIL_FROM,
@@ -272,7 +273,7 @@ export class OrdersService {
   private async sendAdminOrderEmail(order: {
     id: string; fullName: string; email: string; phone: string;
     quantity: number; totalPrice: number;
-    deliveryOption: DeliveryOption; paymentRef: string | null;
+    deliveryOption: delivery_option; paymentRef: string | null;
   }) {
     await this.mailer.sendMail({
       from:    process.env.MAIL_FROM,
@@ -298,7 +299,7 @@ export class OrdersService {
   private async sendReceiptConfirmationEmail(order: {
     id: string; fullName: string; email: string;
     quantity: number; totalPrice: number;
-    deliveryOption: DeliveryOption;
+    deliveryOption: delivery_option;
   }, receiptUrl: string) {
     await this.mailer.sendMail({
       from:    process.env.MAIL_FROM,
@@ -327,7 +328,7 @@ export class OrdersService {
   private async sendHostReceiptEmail(order: {
     id: string; fullName: string; email: string; phone: string;
     quantity: number; totalPrice: number;
-    deliveryOption: DeliveryOption;
+    deliveryOption: delivery_option;
     deliveryAddress: string | null; deliveryState: string | null;
     paymentRef: string | null;
   }, receiptUrl: string) {

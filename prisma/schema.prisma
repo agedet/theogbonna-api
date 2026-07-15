@@ -514,24 +514,24 @@ model attendees {
 }
 
 model orders {
-  id              String         @id
+  id              String          @id
   fullName        String
   email           String
   phone           String
   whatsapp        String?
-  quantity        Int            @default(1)
-  unitPrice       Float          @default(100)
+  quantity        Int             @default(1)
+  unitPrice       Float           @default(100)
   totalPrice      Float
-  deliveryOption  DeliveryOption @default(PICKUP)
+  deliveryOption  delivery_option @default(PICKUP)
   deliveryAddress String?
   deliveryState   String?
-  paymentRef      String?        @unique
+  paymentRef      String?         @unique
   receiptUrl      String?
-  status          OrderStatus    @default(PENDING)
+  status          order_status    @default(new)
   attendeeId      String?
-  createdAt       DateTime       @default(now())
+  createdAt       DateTime        @default(now())
   updatedAt       DateTime
-  attendees       attendees?     @relation(fields: [attendeeId], references: [id])
+  attendees       attendees?      @relation(fields: [attendeeId], references: [id])
   transactions    transactions[]
 
   @@schema("public")
@@ -705,7 +705,7 @@ enum one_time_token_type {
   @@schema("auth")
 }
 
-enum DeliveryOption {
+enum delivery_option {
   PICKUP
   LAGOS
   ABUJA
@@ -713,14 +713,6 @@ enum DeliveryOption {
   ENUGU
   ONITSHA
   OTHER
-
-  @@schema("public")
-}
-
-enum OrderStatus {
-  PENDING
-  CONFIRMED
-  CANCELLED
 
   @@schema("public")
 }

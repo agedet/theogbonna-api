@@ -8,7 +8,7 @@ import {
   Min,
   ValidateIf,
 } from 'class-validator';
-import { DeliveryOption } from '@prisma/client';
+import { delivery_option } from '@prisma/client';
 
 export class CreateOrderDto {
   @IsString()
@@ -32,15 +32,15 @@ export class CreateOrderDto {
   @Max(10)
   quantity: number;
 
-  @IsEnum(DeliveryOption)
-  deliveryOption: DeliveryOption;
+  @IsEnum(delivery_option)
+  deliveryOption: delivery_option;
 
   /** Required for any non-PICKUP delivery */
-  @ValidateIf((o) => o.deliveryOption !== DeliveryOption.PICKUP)
+  @ValidateIf((o) => o.deliveryOption !== delivery_option.PICKUP)
   @IsString()
   deliveryAddress: string;
 
-  @ValidateIf((o) => o.deliveryOption !== DeliveryOption.PICKUP)
+  @ValidateIf((o) => o.deliveryOption !== delivery_option.PICKUP)
   @IsString()
   deliveryState: string;
 

@@ -9,7 +9,7 @@ import { MailService } from '../mail/mail.service.js';
 import { ConfigService } from '@nestjs/config';
 import { InviteAdminDto } from './dto/invite-admin.dto.js';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto.js';
-import { role, OrderStatus } from '@prisma/client';
+import { role } from '@prisma/client';
 import { randomUUID } from 'crypto';
 
 @Injectable()
@@ -189,7 +189,8 @@ export class AdminService {
 
     const updated = await this.prisma.orders.update({
       where: { id },
-      data:  { status: dto.status as unknown as OrderStatus },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      data:  { status: dto.status as any },
     });
 
     await this.prisma.admin_activity_log.create({
@@ -274,8 +275,8 @@ export class AdminService {
       successTransactions,
     ] = await Promise.all([
       this.prisma.orders.count(),
-      this.prisma.orders.count({ where: { status: 'PENDING'    as unknown as OrderStatus } }),
-      this.prisma.orders.count({ where: { status: 'CONFIRMED'  as unknown as OrderStatus } }),
+      this.prisma.orders.count({ where: { status: 'new' as any } }),
+      this.prisma.orders.count({ where: { status: 'payment_verified' as any } }),
       this.prisma.transactions.count(),
       this.prisma.transactions.count({ where: { status: 'PENDING' } }),
       this.prisma.transactions.count({ where: { status: 'SUCCESS' } }),
