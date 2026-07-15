@@ -6,14 +6,14 @@ import {
 } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service.js';
 import { UploadService } from '../upload/upload.service.js';
+import { MailService } from '../mail/mail.service.js';
 import { CreateOrderDto } from './dto/create-order.dto.js';
 import { delivery_option, order_status } from '@prisma/client';
-import * as nodemailer from 'nodemailer';
 import { randomUUID } from 'crypto';
 
 const UNIT_PRICE_GBP = 100;
 const HOST_PHONE     = '2347065606131'; // WhatsApp host number (no +)
-const HOST_EMAIL     = process.env.HOST_EMAIL ?? process.env.MAIL_USER ?? '';
+const HOST_EMAIL     = process.env.HOST_EMAIL ?? '';
 
 /** Flat delivery surcharges in GBP */
 const DELIVERY_FEES: Record<delivery_option, number> = {
@@ -33,22 +33,11 @@ function deliveryLabel(opt: delivery_option): string {
 
 @Injectable()
 export class OrdersService {
-  private readonly mailer: nodemailer.Transporter;
-
   constructor(
-    private readonly prisma:  DatabaseService,
-    private readonly upload:  UploadService,
-  ) {
-    this.mailer = nodemailer.createTransport({
-      host:   process.env.MAIL_HOST,
-      port:   Number(process.env.MAIL_PORT),
-      secure: process.env.MAIL_SECURE === 'true',
-      auth: {
-        user: process.env.MAIL_USER,
-        pass: process.env.MAIL_PASSWORD,
-      },
-    });
-  }
+    private readonly prisma: DatabaseService,
+    private readonly upload: UploadService,
+    private readonly mail: MailService,
+  ) {}
 
   // ── Create order ────────────────────────────────────────────────────────────
 
@@ -242,8 +231,7 @@ export class OrdersService {
     quantity: number; totalPrice: number;
     deliveryOption: delivery_option; paymentRef: string | null;
   }) {
-    await this.mailer.sendMail({
-      from:    process.env.MAIL_FROM,
+    await this.mail.sendMail({
       to:      order.email,
       subject: 'Ogbonna Memorial — Asoebi Order Received',
       html: `
@@ -275,8 +263,7 @@ export class OrdersService {
     quantity: number; totalPrice: number;
     deliveryOption: delivery_option; paymentRef: string | null;
   }) {
-    await this.mailer.sendMail({
-      from:    process.env.MAIL_FROM,
+    await this.mail.sendMail({
       to:      HOST_EMAIL,
       subject: `New Asoebi Order — ${order.fullName}`,
       html: `
@@ -301,8 +288,7 @@ export class OrdersService {
     quantity: number; totalPrice: number;
     deliveryOption: delivery_option;
   }, receiptUrl: string) {
-    await this.mailer.sendMail({
-      from:    process.env.MAIL_FROM,
+    await this.mail.sendMail({
       to:      order.email,
       subject: 'Ogbonna Memorial — Receipt Received, Order Being Verified',
       html: `
@@ -332,8 +318,7 @@ export class OrdersService {
     deliveryAddress: string | null; deliveryState: string | null;
     paymentRef: string | null;
   }, receiptUrl: string) {
-    await this.mailer.sendMail({
-      from:    process.env.MAIL_FROM,
+    await this.mail.sendMail({
       to:      HOST_EMAIL,
       subject: `🧾 Receipt Uploaded — ${order.fullName} (Order ${order.id})`,
       html: `

@@ -1,25 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as nodemailer from 'nodemailer';
-import { MailOptions } from './interfaces/mail.interface';
-import { TemplateService } from './templates/template.service';
-import { EmailTemplate } from './constants/template-names';
+import { Resend } from 'resend';
+import { MailOptions } from './interfaces/mail.interface.js';
+import { TemplateService } from './templates/template.service.js';
+import { EmailTemplate } from './constants/template-names.js';
 
-/** Minimum ms between any two emails to avoid SMTP rate limit (e.g. Microsoft 365 450 4.5.127) */
-const MAIL_THROTTLE_MS = 10000; // Increased to 10 seconds for Microsoft 365 compatibility
-
-/** Maximum retry attempts for rate limit errors */
+/** Soft throttle between sends (Resend rate limits are higher than SMTP) */
+const MAIL_THROTTLE_MS = 500;
 const MAX_RETRY_ATTEMPTS = 5;
-
-/** Base delay for exponential backoff (in ms) */
-const BASE_RETRY_DELAY_MS = 30000; // 30 seconds
+const BASE_RETRY_DELAY_MS = 2000;
 
 const delay = (ms: number) =>
   new Promise<void>(resolve => setTimeout(resolve, ms));
 
-/**
- * Check if error is a rate limit error (450 4.5.127)
- */
 function isRateLimitError(error: unknown): boolean {
   if (!error) return false;
   let errorMessage: string;
@@ -32,23 +25,35 @@ function isRateLimitError(error: unknown): boolean {
   } else {
     errorMessage = JSON.stringify(error);
   }
+  const status =
+    error && typeof error === 'object' && 'statusCode' in error
+      ? Number((error as { statusCode: unknown }).statusCode)
+      : undefined;
+
   return (
-    errorMessage.includes('450 4.5.127') ||
-    errorMessage.includes('Excessive message rate') ||
+    status === 429 ||
+    errorMessage.includes('429') ||
+    errorMessage.includes('rate_limit') ||
     errorMessage.includes('rate limit') ||
     errorMessage.includes('too many') ||
     errorMessage.includes('throttle')
   );
 }
 
+type ResendAttachment = {
+  filename: string;
+  content: Buffer | string;
+  contentId?: string;
+  contentType?: string;
+};
+
 /**
- * Mail Service - Handles sending emails with template support.
- * Uses a global send queue so all sends are serialized with a minimum interval (throttle).
+ * Mail Service — sends via Resend HTTP API (works on Vercel serverless).
  */
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
-  private transporter!: nodemailer.Transporter;
+  private readonly resend: Resend;
   private lastSentAt = 0;
   private sendQueue: Promise<void> = Promise.resolve();
   private currentThrottleMs: number;
@@ -58,135 +63,92 @@ export class MailService {
     private configService: ConfigService,
     private templateService: TemplateService,
   ) {
+    const apiKey = this.configService.get<string>('email.resendApiKey');
+    if (!apiKey) {
+      this.logger.error(
+        'RESEND_API_KEY is not set — emails will fail until it is configured',
+      );
+    } else {
+      this.logger.log('Resend mail client initialized');
+    }
+
+    this.resend = new Resend(apiKey || 'missing-resend-api-key');
     this.currentThrottleMs =
       Number(this.configService.get('mailThrottleMs')) || MAIL_THROTTLE_MS;
-    this.initializeTransporter();
-
-    // Verify connection on startup (non-blocking)
-    this.verifyConnection().catch(error => {
-      this.logger.warn(
-        `Email service verification failed on startup: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      this.logger.warn(
-        'Emails may not send until SMTP configuration is corrected',
-      );
-    });
   }
 
-  /** Wait until throttle allows sending (min interval since last send) */
   private async waitForThrottle(): Promise<void> {
     const now = Date.now();
     const elapsed = now - this.lastSentAt;
     if (elapsed < this.currentThrottleMs && this.lastSentAt > 0) {
-      const waitTime = this.currentThrottleMs - elapsed;
-      this.logger.debug(
-        `Throttling email send: waiting ${waitTime}ms (current throttle: ${this.currentThrottleMs}ms)`,
-      );
-      await delay(waitTime);
+      await delay(this.currentThrottleMs - elapsed);
     }
   }
 
-  /**
-   * Adjust throttle interval based on rate limit errors
-   * Increases throttle when rate limits are hit, decreases when successful
-   */
   private adjustThrottle(rateLimitHit: boolean): void {
     const baseThrottle =
       Number(this.configService.get('mailThrottleMs')) || MAIL_THROTTLE_MS;
-    const maxThrottle = baseThrottle * 4; // Max 4x the base throttle
+    const maxThrottle = baseThrottle * 8;
 
     if (rateLimitHit) {
       this.consecutiveRateLimitErrors++;
-      // Increase throttle exponentially up to max
       this.currentThrottleMs = Math.min(
         baseThrottle * Math.pow(2, this.consecutiveRateLimitErrors),
         maxThrottle,
       );
       this.logger.warn(
-        `Rate limit detected. Increasing throttle to ${this.currentThrottleMs}ms (consecutive errors: ${this.consecutiveRateLimitErrors})`,
+        `Rate limit detected. Throttle → ${this.currentThrottleMs}ms`,
+      );
+    } else if (this.consecutiveRateLimitErrors > 0) {
+      this.consecutiveRateLimitErrors = Math.max(
+        0,
+        this.consecutiveRateLimitErrors - 1,
+      );
+      this.currentThrottleMs = Math.max(
+        baseThrottle,
+        this.currentThrottleMs * 0.75,
       );
     } else {
-      // Gradually decrease throttle on success
-      if (this.consecutiveRateLimitErrors > 0) {
-        this.consecutiveRateLimitErrors = Math.max(
-          0,
-          this.consecutiveRateLimitErrors - 1,
-        );
-        this.currentThrottleMs = Math.max(
-          baseThrottle,
-          this.currentThrottleMs * 0.75,
-        );
-        this.logger.log(
-          `Email sent successfully. Reducing throttle to ${this.currentThrottleMs}ms`,
-        );
-      } else {
-        this.currentThrottleMs = baseThrottle;
-      }
+      this.currentThrottleMs = baseThrottle;
     }
   }
 
-  /**
-   * Initialize nodemailer transporter
-   */
-  private initializeTransporter(): void {
-    const host =
-      this.configService.get<string>('email.host') || 'smtp.gmail.com';
-    const port = parseInt(
-      this.configService.get<string>('email.port') || '587',
-      10,
-    );
-    const secure = this.configService.get<string>('email.secure') === 'true';
-    const user = this.configService.get<string>('email.user');
-    const password = this.configService.get<string>('email.password');
+  private resolveFromAddress(fromOverride?: string): string {
+    if (fromOverride?.trim()) return fromOverride.trim();
 
-    // Log configuration (without sensitive data)
-    this.logger.log(
-      `Initializing email transporter: ${host}:${port} (secure: ${secure}, user: ${user ? 'configured' : 'missing'})`,
-    );
+    const configured = this.configService.get<string>('email.from')?.trim();
+    if (configured) return configured;
 
-    if (!user || !password) {
-      this.logger.error(
-        'Email configuration incomplete: SMTP_USER and SMTP_PASS must be set',
-      );
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-    this.transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure, // true for 465, false for other ports
-      // For Azure Communication Services and other services using STARTTLS on port 587
-      requireTLS: !secure && port === 587,
-      auth: {
-        user,
-        pass: password,
-      },
-      // Additional TLS options for better compatibility
-      tls: {
-        // Do not fail on invalid certificates (useful for development)
-        rejectUnauthorized:
-          this.configService.get<string>('nodeEnv') === 'production',
-      },
-    });
-  }
-
-  /**
-   * Default From with display name (better recognition than bare noreply@).
-   * Use SMTP_FROM on the same domain as SPF/DKIM for the sending account.
-   */
-  private resolveFromAddress(
-    fromOverride?: string,
-  ): string | { name: string; address: string } {
-    if (fromOverride) {
-      return fromOverride;
-    }
-    const address =
-      this.configService.get<string>('email.from') || 'noreply@example.com';
     const name = this.configService.get<string>('email.fromName')?.trim();
-    if (name) {
-      return { name, address };
+    const address =
+      this.configService.get<string>('email.fromAddress')?.trim() ||
+      'info@ogbonnasmemorial.com';
+
+    return name ? `${name} <${address}>` : address;
+  }
+
+  private toAttachmentPayload(
+    items: NonNullable<MailOptions['attachments']>,
+  ): ResendAttachment[] {
+    const out: ResendAttachment[] = [];
+
+    for (const a of items) {
+      if (a.content == null) {
+        this.logger.warn(
+          `Skipping attachment "${a.filename}" — only Buffer/string content is supported with Resend`,
+        );
+        continue;
+      }
+
+      out.push({
+        filename: a.filename,
+        content: a.content,
+        ...(a.contentType ? { contentType: a.contentType } : {}),
+        ...(a.cid ? { contentId: a.cid } : {}),
+      });
     }
-    return address;
+
+    return out;
   }
 
   /**
@@ -207,26 +169,18 @@ export class MailService {
       attachments,
     } = options;
 
-    // Render template if provided
     let emailHtml = html;
     let emailSubject = subject;
-    let templateAttachments: Array<{
-      filename: string;
-      content: Buffer;
-      cid: string;
-      contentType: string;
-    }> = [];
+    let templateAttachments: NonNullable<MailOptions['attachments']> = [];
 
     if (template) {
       emailHtml = this.templateService.render(template, data);
       emailSubject = subject || this.templateService.getSubject(template, data);
 
-      // Get CID image attachments from template (for embedded images)
       const templateInstance = this.templateService.getTemplate(template);
       if (
         templateInstance &&
         typeof templateInstance === 'object' &&
-        templateInstance !== null &&
         'getImageAttachments' in templateInstance &&
         typeof (
           templateInstance as {
@@ -252,10 +206,8 @@ export class MailService {
       );
     }
 
-    // Generate plain text version if not provided (improves deliverability)
     let plainText = text;
     if (!plainText && emailHtml) {
-      // Strip HTML tags for basic plain text version
       plainText = emailHtml
         .replace(/<style[^>]*>.*?<\/style>/gis, '')
         .replace(/<script[^>]*>.*?<\/script>/gis, '')
@@ -264,31 +216,36 @@ export class MailService {
         .trim();
     }
 
-    const mailOptions: nodemailer.SendMailOptions = {
+    const allAttachments = [
+      ...templateAttachments,
+      ...(attachments ?? []),
+    ];
+    const resendAttachments =
+      allAttachments.length > 0
+        ? this.toAttachmentPayload(allAttachments)
+        : undefined;
+
+    const recipientList = Array.isArray(to) ? to : [to];
+    const recipient = recipientList.join(', ');
+
+    const payload = {
       from: this.resolveFromAddress(from),
-      to: Array.isArray(to) ? to.join(', ') : to,
+      to: recipientList,
       subject: emailSubject,
       html: emailHtml,
-      text: plainText, // Always include plain text version
+      text: plainText,
       replyTo:
         replyToOverride ||
         this.configService.get<string>('email.replyTo') ||
         undefined,
-      cc: cc ? (Array.isArray(cc) ? cc.join(', ') : cc) : undefined,
-      bcc: bcc ? (Array.isArray(bcc) ? bcc.join(', ') : bcc) : undefined,
-      attachments: attachments
-        ? [...templateAttachments, ...attachments]
-        : templateAttachments.length > 0
-          ? templateAttachments
+      cc: cc ? (Array.isArray(cc) ? cc : [cc]) : undefined,
+      bcc: bcc ? (Array.isArray(bcc) ? bcc : [bcc]) : undefined,
+      attachments:
+        resendAttachments && resendAttachments.length > 0
+          ? resendAttachments
           : undefined,
-      /**
-       * Do not set Precedence: bulk or Auto-Submitted — those classify mail as
-       * bulk/list traffic and strongly correlate with spam/promotions placement.
-       * SPF/DKIM alignment for SMTP_FROM + SMTP_USER domain is still required for inbox delivery.
-       */
     };
 
-    const recipient = Array.isArray(to) ? to.join(', ') : to;
     const doSend = async (): Promise<void> => {
       await this.waitForThrottle();
 
@@ -298,101 +255,64 @@ export class MailService {
       while (attempt < MAX_RETRY_ATTEMPTS) {
         attempt++;
         try {
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-          const info = await this.transporter.sendMail(mailOptions);
-          this.lastSentAt = Date.now();
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-          this.logger.log(`Email sent to ${recipient}: ${info.messageId}`);
-          this.adjustThrottle(false); // Success - reduce throttle if needed
-          return; // Success, exit retry loop
-        } catch (error) {
-          lastError = error instanceof Error ? error : new Error(String(error));
-          const errorMessage = lastError.message;
-          const errorStack = lastError.stack;
-          const isRateLimit = isRateLimitError(error);
-
-          // Log detailed error information for debugging
-          this.logger.error(
-            `Email send attempt ${attempt}/${MAX_RETRY_ATTEMPTS} failed for ${recipient}: ${errorMessage}`,
+          const { data: result, error } = await this.resend.emails.send(
+            payload as Parameters<Resend['emails']['send']>[0],
           );
 
-          // Log full error details in debug mode
-          if (errorStack) {
-            this.logger.debug(`Error stack: ${errorStack}`);
+          if (error) {
+            throw Object.assign(new Error(error.message), {
+              statusCode: (error as { statusCode?: number }).statusCode,
+              name: error.name,
+            });
           }
 
-          // Log error code if available (common in nodemailer errors)
-          if (error && typeof error === 'object' && 'code' in error) {
-            const errorWithCode = error as { code: unknown };
-            this.logger.debug(`Error code: ${String(errorWithCode.code)}`);
-          }
-          if (error && typeof error === 'object' && 'response' in error) {
-            const errorWithResponse = error as { response: unknown };
-            this.logger.debug(
-              `SMTP response: ${String(errorWithResponse.response)}`,
-            );
-          }
-          if (error && typeof error === 'object' && 'responseCode' in error) {
-            const errorWithResponseCode = error as { responseCode: unknown };
-            this.logger.debug(
-              `SMTP response code: ${String(errorWithResponseCode.responseCode)}`,
-            );
-          }
+          this.lastSentAt = Date.now();
+          this.logger.log(
+            `Email sent to ${recipient}: ${result?.id ?? 'ok'}`,
+          );
+          this.adjustThrottle(false);
+          return;
+        } catch (error) {
+          lastError =
+            error instanceof Error ? error : new Error(String(error));
+          const isRateLimit = isRateLimitError(error);
+
+          this.logger.error(
+            `Email send attempt ${attempt}/${MAX_RETRY_ATTEMPTS} failed for ${recipient}: ${lastError.message}`,
+          );
 
           if (isRateLimit && attempt < MAX_RETRY_ATTEMPTS) {
-            // Rate limit error - retry with exponential backoff
             const backoffDelay = BASE_RETRY_DELAY_MS * Math.pow(2, attempt - 1);
             this.logger.warn(
-              `Rate limit error sending email to ${recipient} (attempt ${attempt}/${MAX_RETRY_ATTEMPTS}). Retrying in ${backoffDelay}ms...`,
+              `Rate limited — retrying in ${backoffDelay}ms (attempt ${attempt}/${MAX_RETRY_ATTEMPTS})`,
             );
-            this.adjustThrottle(true); // Increase throttle
+            this.adjustThrottle(true);
             await delay(backoffDelay);
-            // Wait for throttle again before retry
             await this.waitForThrottle();
-            continue; // Retry
-          } else {
-            // Non-rate-limit error or max retries reached
-            if (isRateLimit) {
-              this.logger.error(
-                `Failed to send email to ${recipient} after ${attempt} attempts due to rate limiting`,
-                errorStack,
-              );
-            } else {
-              this.logger.error(
-                `Failed to send email to ${recipient} (attempt ${attempt}/${MAX_RETRY_ATTEMPTS}): ${errorMessage}`,
-                errorStack,
-              );
-            }
-            throw new Error(`Failed to send email: ${errorMessage}`);
+            continue;
           }
+
+          throw new Error(`Failed to send email: ${lastError.message}`);
         }
       }
 
-      // Should never reach here, but TypeScript needs it
       if (lastError) {
         throw new Error(
           `Failed to send email after ${MAX_RETRY_ATTEMPTS} attempts: ${lastError.message}`,
         );
       }
     };
+
     const ourSend = this.sendQueue.then(doSend);
-    // Update queue to continue processing, but don't catch errors here
-    // Errors from doSend should propagate to the caller via ourSend
     this.sendQueue = ourSend.catch(error => {
-      // Log queue errors but don't throw to keep queue moving
-      // Note: This catch is for queue continuity only; the error still propagates via ourSend
       this.logger.error(
-        `Email queue error (email may have failed): ${error instanceof Error ? error.message : String(error)}`,
+        `Email queue error: ${error instanceof Error ? error.message : String(error)}`,
       );
-      // Re-throw to ensure the error propagates to the caller
       throw error;
     });
     await ourSend;
   }
 
-  /**
-   * Send OTP email (convenience method)
-   */
   async sendOtpEmail(
     email: string,
     otpCode: string,
@@ -410,9 +330,6 @@ export class MailService {
     });
   }
 
-  /**
-   * Send welcome email (convenience method)
-   */
   async sendWelcomeEmail(
     email: string,
     userName?: string,
@@ -428,9 +345,6 @@ export class MailService {
     });
   }
 
-  /**
-   * Send project invitation email (convenience method)
-   */
   async sendProjectInvitationEmail(
     email: string,
     projectName: string,
@@ -450,10 +364,6 @@ export class MailService {
     });
   }
 
-  /**
-   * Send user invitation email (convenience method)
-   * Used for inviting both PARTNER and ENBROS users
-   */
   async sendUserInvitationEmail(
     email: string,
     role: string,
@@ -470,15 +380,12 @@ export class MailService {
         role,
         invitationLink,
         inviterName,
-        platformName: 'Bwana Platform',
+        platformName: 'Ogbonnas Memorial',
         isResend,
       },
     });
   }
 
-  /**
-   * Send task assignment email (convenience method)
-   */
   async sendTaskAssignmentEmail(
     email: string,
     taskTitle: string,
@@ -500,10 +407,6 @@ export class MailService {
     });
   }
 
-  /**
-   * Send ticket created email (convenience method).
-   * When createdByName is set, email shows "X created a ticket \"Y\" on your behalf."
-   */
   async sendTicketCreatedEmail(
     email: string,
     ticketTitle: string,
@@ -529,9 +432,6 @@ export class MailService {
     });
   }
 
-  /**
-   * Send ticket update email (convenience method)
-   */
   async sendTicketUpdateEmail(
     email: string,
     ticketTitle: string,
@@ -559,9 +459,6 @@ export class MailService {
     });
   }
 
-  /**
-   * Notify operations managers that a probation review is due.
-   */
   async sendProbationReviewRequestEmail(
     to: string,
     options: {
@@ -597,14 +494,9 @@ export class MailService {
     });
   }
 
-  /**
-   * Notify a user that their probation has been confirmed.
-   */
   async sendProbationConfirmedEmail(
     to: string,
-    options: {
-      userName: string;
-    },
+    options: { userName: string },
   ): Promise<void> {
     await this.sendMail({
       to,
@@ -623,15 +515,9 @@ export class MailService {
     });
   }
 
-  /**
-   * Ask a user to complete their admin profile.
-   */
   async sendProfileCompletionReminderEmail(
     to: string,
-    options: {
-      userName: string;
-      profileUrl: string;
-    },
+    options: { userName: string; profileUrl: string },
   ): Promise<void> {
     await this.sendMail({
       to,
@@ -650,43 +536,16 @@ export class MailService {
     });
   }
 
-  /**
-   * Verify email service connection
-   */
+  /** Lightweight startup check — Resend has no SMTP verify() */
   async verifyConnection(): Promise<boolean> {
-    try {
-      this.logger.log('Verifying email service connection...');
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment
-      const result = await this.transporter.verify();
-      this.logger.log('Email service connection verified successfully');
-
-      if (result) {
-        this.logger.debug(`SMTP server response: ${JSON.stringify(result)}`);
-      }
-      return true;
-    } catch (error: unknown) {
-      const errorMessage =
-        error instanceof Error
-          ? error.message
-          : typeof error === 'string'
-            ? error
-            : JSON.stringify(error);
-      const errorStack = error instanceof Error ? error.stack : undefined;
-      this.logger.error(
-        `Email service connection failed: ${errorMessage}`,
-        errorStack,
-      );
-
-      // Provide helpful debugging information
-      const host = this.configService.get<string>('email.host');
-      const port = this.configService.get<string>('email.port');
-      const user = this.configService.get<string>('email.user');
-
-      this.logger.error(
-        `SMTP Configuration: host=${host}, port=${port}, user=${user ? 'configured' : 'MISSING'}`,
-      );
-
+    const apiKey = this.configService.get<string>('email.resendApiKey');
+    if (!apiKey) {
+      this.logger.error('Resend not configured: RESEND_API_KEY is missing');
       return false;
     }
+    this.logger.log(
+      `Resend ready (from: ${this.resolveFromAddress()})`,
+    );
+    return true;
   }
 }

@@ -41,11 +41,11 @@
     "he": "^1.2.0",
     "helmet": "^8.3.0",
     "multer": "^2.0.1",
-    "nodemailer": "^8.0.5",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "passport-local": "^1.0.0",
     "reflect-metadata": "^0.2.2",
+    "resend": "^6.17.2",
     "rxjs": "^7.8.1"
   },
   "devDependencies": {
@@ -59,7 +59,6 @@
     "@types/jest": "^30.0.0",
     "@types/multer": "^2.2.0",
     "@types/node": "^22.10.7",
-    "@types/nodemailer": "^8.0.1",
     "@types/supertest": "^6.0.2",
     "dotenv": "^17.2.3",
     "eslint": "^9.18.0",
