@@ -14,6 +14,33 @@ type PrismaTransactionClient = Omit<
   '$connect' | '$disconnect' | '$on' | '$transaction' | '$extends'
 >;
 
+/**
+ * Supabase transaction pooler (port 6543) does not support prepared statements.
+ * Prisma must be told via pgbouncer=true or you get Postgres 42P05:
+ * prepared statement "s0" already exists
+ */
+function normalizeDatabaseUrl(raw: string): string {
+  try {
+    const url = new URL(raw);
+    const isPooler =
+      url.port === '6543' ||
+      url.hostname.includes('pooler.supabase.com');
+
+    if (isPooler) {
+      if (!url.searchParams.has('pgbouncer')) {
+        url.searchParams.set('pgbouncer', 'true');
+      }
+      if (!url.searchParams.has('connection_limit')) {
+        url.searchParams.set('connection_limit', '1');
+      }
+    }
+
+    return url.toString();
+  } catch {
+    return raw;
+  }
+}
+
 @Injectable()
 export class DatabaseService
   extends PrismaClient
@@ -22,18 +49,20 @@ export class DatabaseService
   private readonly logger = new LoggerService().setContext('DatabaseService');
 
   constructor() {
-    // Prisma 6.x: Uses DATABASE_URL from .env file (via dotenv.config() in main.ts)
-    // Prisma 6.x handles connection pooling internally, no adapter needed
-
-    // Ensure DATABASE_URL is available before initializing PrismaClient
     if (!process.env.DATABASE_URL) {
       throw new Error(
         'DATABASE_URL environment variable is required. Make sure .env file is loaded and contains DATABASE_URL.',
       );
     }
 
-    // Initialize PrismaClient (Prisma 6.x handles connection pooling internally)
+    const datasourceUrl = normalizeDatabaseUrl(process.env.DATABASE_URL);
+    // Keep process.env in sync for any tooling that reads it later
+    process.env.DATABASE_URL = datasourceUrl;
+
     super({
+      datasources: {
+        db: { url: datasourceUrl },
+      },
       log:
         process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
     });
