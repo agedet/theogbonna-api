@@ -4,147 +4,139 @@ import { EmailTemplate } from '../constants/template-names';
 
 /**
  * User Invitation Email Template
- * Used for inviting both PARTNER and ENBROS users to the platform
- * Design follows Bwana-v2 Figma specifications
+ *
+ * Supports three audience branches:
+ *   role === 'admin'   → Ogbonna Memorial admin invitation (primary use-case)
+ *   role === 'ENBROS'  → Internal Enbros team member (legacy)
+ *   anything else      → Generic partner/client invitation (legacy)
  */
 export class UserInvitationEmailTemplate extends BaseEmailTemplate {
   name = EmailTemplate.USER_INVITATION;
 
   render(data: MailTemplateData): string {
-    const { userName = 'there', role, invitationLink, isResend = false } = data;
+    const { userName = 'there', role, invitationLink, inviterName, isResend = false } = data;
 
+    const isAdmin  = role === 'admin' || role === 'super_admin';
     const isEnbros = role === 'ENBROS';
 
-    // Different content based on user role
-    const content = isEnbros
-      ? this.renderEnbrosContent(
-          userName as string,
-          invitationLink as string,
-          isResend as boolean,
-        )
-      : this.renderPartnerContent(
-          userName as string,
-          invitationLink as string,
-          isResend as boolean,
-        );
+    let content: string;
+    let title:   string;
 
-    const title = isEnbros
-      ? isResend
-        ? 'Reminder: Join the Enbros Team'
-        : 'Welcome to the Enbros Team'
-      : 'Welcome to your project portal on Bwana';
+    if (isAdmin) {
+      content = this.renderAdminContent(
+        userName as string,
+        invitationLink as string,
+        inviterName as string | undefined,
+        isResend as boolean,
+      );
+      title = isResend
+        ? 'Reminder: Admin Account Invitation — Ogbonna Memorial'
+        : 'You\'ve been invited as an Admin — Ogbonna Memorial';
+    } else if (isEnbros) {
+      content = this.renderEnbrosContent(userName as string, invitationLink as string, isResend as boolean);
+      title   = isResend ? 'Reminder: Join the Enbros Team' : 'Welcome to the Enbros Team';
+    } else {
+      content = this.renderPartnerContent(userName as string, invitationLink as string);
+      title   = 'Welcome to your project portal on Bwana';
+    }
 
     return this.getBaseHtml(content, title, undefined, data);
   }
 
-  /**
-   * Render ENBROS team member invitation content
-   * Optimized to avoid spam filters - transactional, not promotional
-   */
-  private renderEnbrosContent(
-    userName: string,
-    invitationLink?: string,
-    isResend = false,
+  // ─── Ogbonna Memorial admin invitation ──────────────────────────────────────
+
+  private renderAdminContent(
+    userName:       string,
+    invitationLink: string,
+    inviterName    = 'The Super Admin',
+    isResend       = false,
   ): string {
     return `
-      <!-- Title -->
-      <h1 style="margin: 0 0 8px 0; font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; font-size: 20px; font-weight: 700; line-height: 28px; color: ${this.colors.textStrong};">
-        ${isResend ? 'Team Account Access Link' : 'Your Team Account is Ready'}
+      <h1 style="margin:0 0 8px 0;font-family:sans-serif;font-size:22px;font-weight:700;color:${this.colors.textStrong};">
+        ${isResend ? 'Your Invitation Link (Resent)' : 'You\'ve been invited to join the team'}
       </h1>
-      
-      <!-- Greeting -->
-      <div style="font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; font-size: 16px; line-height: 24px; color: ${this.colors.textStrong}; letter-spacing: -0.18px;">
-        <p style="margin: 0; font-weight: 500;">
-          Hello ${this.escapeHtml(userName)},
+
+      <div style="font-family:sans-serif;font-size:16px;line-height:24px;color:${this.colors.textStrong};">
+        <p style="margin:0 0 16px 0;">
+          Hi <strong>${this.escapeHtml(userName)}</strong>,
         </p>
-        <p style="margin: 0 0 16px 0;">
-          ${
-            isResend
-              ? 'Your administrator has resent your access link to the Bwana team workspace.'
-              : 'Your administrator has created a team account for you on Bwana.'
-          }
+        <p style="margin:0 0 16px 0;">
+          ${this.escapeHtml(inviterName)} has invited you to the
+          <strong>Ogbonna Memorial</strong> admin platform${isResend ? ' (this is a reminder)' : ''}.
         </p>
-        
-        <p style="margin: 0 0 16px 0;">
-          Please use the secure link below to access your account within the next 24 hours.
+        <p style="margin:0 0 16px 0;">
+          Click the button below to set up your password and access the dashboard.
+          This link is valid for <strong>7 days</strong>.
         </p>
       </div>
-      
-      <!-- CTA Button -->
-      ${invitationLink ? this.getButtonHtml('Access Your Account', invitationLink) : ''}
-      
-      <!-- Divider -->
+
+      ${invitationLink ? this.getButtonHtml('Set Up My Account', invitationLink) : ''}
+
       ${this.getDividerHtml()}
-      
-      <!-- Login method note -->
-      <p style="margin: 0 0 8px 0; font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; font-size: 14px; line-height: 20px; color: ${this.colors.textSub};">
-        <strong>Authentication:</strong> Use your Google Workspace account to sign in securely.
+
+      <p style="margin:0 0 8px 0;font-family:sans-serif;font-size:13px;color:${this.colors.textSub};">
+        <strong>What you can do as an admin:</strong> view and manage asoebi orders,
+        verify payment receipts, and update order statuses.
       </p>
-      
-      <!-- Security note -->
-      <p style="margin: 0 0 8px 0; font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; font-size: 14px; line-height: 20px; color: ${this.colors.textSub};">
-        <strong>Important:</strong> This link expires in 24 hours for security purposes.
+
+      <p style="margin:0 0 8px 0;font-family:sans-serif;font-size:13px;color:${this.colors.textSub};">
+        <strong>Security note:</strong> This link expires in 7 days and can only be used once.
+        If you did not expect this invitation, you can safely ignore this email.
       </p>
-      
-      <!-- Disclaimer -->
-      <p style="margin: 0; font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; font-size: 14px; line-height: 20px; color: ${this.colors.textSoft};">
-        If you did not expect this email, please contact your administrator or ignore this message.
-      </p>
-      
-      <!-- Help text -->
+
       ${this.getHelpTextHtml()}
     `;
   }
 
-  /**
-   * Render PARTNER/Client invitation content
-   */
-  private renderPartnerContent(
-    userName: string,
-    invitationLink?: string,
-    _isResend = false,
-  ): string {
+  // ─── Legacy: ENBROS team member ──────────────────────────────────────────────
+
+  private renderEnbrosContent(userName: string, invitationLink?: string, isResend = false): string {
     return `
-      <!-- Title -->
-      <h1 style="margin: 0 0 16px 0; font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; font-size: 20px; font-weight: 700; line-height: 28px; color: ${this.colors.textStrong};">
+      <h1 style="margin:0 0 8px 0;font-family:sans-serif;font-size:20px;font-weight:700;color:${this.colors.textStrong};">
+        ${isResend ? 'Team Account Access Link' : 'Your Team Account is Ready'}
+      </h1>
+      <div style="font-family:sans-serif;font-size:16px;line-height:24px;color:${this.colors.textStrong};">
+        <p style="margin:0 0 16px 0;">Hello ${this.escapeHtml(userName)},</p>
+        <p style="margin:0 0 16px 0;">
+          ${isResend ? 'Your administrator has resent your access link.' : 'Your administrator has created a team account for you on Bwana.'}
+        </p>
+        <p style="margin:0 0 16px 0;">Please use the link below within the next 24 hours.</p>
+      </div>
+      ${invitationLink ? this.getButtonHtml('Access Your Account', invitationLink) : ''}
+      ${this.getDividerHtml()}
+      <p style="font-family:sans-serif;font-size:13px;color:${this.colors.textSub};">
+        <strong>Important:</strong> This link expires in 24 hours.
+      </p>
+      ${this.getHelpTextHtml()}
+    `;
+  }
+
+  // ─── Legacy: partner/client ───────────────────────────────────────────────────
+
+  private renderPartnerContent(userName: string, invitationLink?: string): string {
+    return `
+      <h1 style="margin:0 0 16px 0;font-family:sans-serif;font-size:20px;font-weight:700;color:${this.colors.textStrong};">
         Welcome to your project portal on Bwana
       </h1>
-      
-      <!-- Greeting and intro -->
-      <div style="font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; font-size: 16px; line-height: 24px; color: ${this.colors.textStrong}; letter-spacing: -0.18px;">
-        <p style="margin: 0 0 16px 0;">
-          Hi ${this.escapeHtml(userName)},
-        </p>
-        <p style="margin: 0 0 16px 0;">
-          Welcome to Bwana, your dedicated project hub with Enbros.
-        </p>
-        <p style="margin: 0 0 16px 0;">
-          We've just assigned you to your project dashboard. Bwana is designed to give you full visibility into our work, allowing you to track real-time progress, easily raise new requests or bug reports, and ask questions directly to the development team.
-        </p>
+      <div style="font-family:sans-serif;font-size:16px;line-height:24px;color:${this.colors.textStrong};">
+        <p style="margin:0 0 16px 0;">Hi ${this.escapeHtml(userName)},</p>
+        <p style="margin:0 0 16px 0;">Welcome to Bwana, your dedicated project hub with Enbros.</p>
       </div>
-      
-      <!-- CTA Button -->
       ${invitationLink ? this.getButtonHtml('Log in to Bwana', invitationLink) : ''}
-      
-      <!-- Closing -->
-      <div style="font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; font-size: 16px; line-height: 24px; color: ${this.colors.textStrong}; letter-spacing: -0.18px;">
-        <p style="margin: 0 0 16px 0;">
-          We are excited to collaborate with you more transparently and efficiently. If you have any trouble logging in, <a href="${this.escapeHtml(this.links.contact)}" target="_blank" style="color: ${this.colors.primary}; text-decoration: underline;">contact us</a>.
-        </p>
-        <p style="margin: 0 0 4px 0;">
-          Best regards,
-        </p>
-        <p style="margin: 0; font-weight: 600;">
-          The Enbros Team
-        </p>
-      </div>
     `;
   }
 
   getSubject(data: MailTemplateData): string {
+    const isAdmin  = data.role === 'admin' || data.role === 'super_admin';
+    const isEnbros = data.role === 'ENBROS';
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const isResend = data.isResend || false;
-    const isEnbros = data.role === 'ENBROS';
+
+    if (isAdmin) {
+      return isResend
+        ? 'Reminder: Set up your Ogbonna Memorial admin account'
+        : 'You\'ve been invited to the Ogbonna Memorial admin platform';
+    }
 
     if (isEnbros) {
       return isResend
@@ -152,7 +144,6 @@ export class UserInvitationEmailTemplate extends BaseEmailTemplate {
         : 'Action Required: Your Team Account - Bwana';
     }
 
-    // PARTNER subject - same for new and resend
     return 'Welcome to your project portal on Bwana';
   }
 }

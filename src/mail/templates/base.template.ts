@@ -4,10 +4,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 /**
- * Base email template class - Bwana Platform Design
+ * Base email template class - Ogbonna Platform Design
  * All email templates should extend this class
  *
- * Design based on Figma: Bwana-v2 Email Template
+ * Design based on Figma: Ogbonna-v2 Email Template
  * - Gradient background (blue to purple/orange)
  * - White header with logo and social icons
  * - White content card with shadow
@@ -50,12 +50,11 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
     return he.encode(text, { useNamedReferences: false });
   }
 
-  // External links - Enbros company links
+  // External links - ogbonna company links
   protected readonly links = {
-    website: 'https://enbros.co.uk/',
-    contact: 'https://enbros.co.uk/contact',
-    linkedin: 'https://www.linkedin.com/company/enbros/',
-    supportEmail: 'support@enbros.co.uk',
+    website: 'https://www.ogbonnasmemorial.com/',
+    contact: 'https://www.ogbonnasmemorial.com/contact',
+    supportEmail: 'info@ogbonnasmemorial.com',
   };
 
   // CID references for embedded images
@@ -63,9 +62,8 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
   // because email clients often block external images or URLs may be inaccessible
   protected get imageCids() {
     return {
-      logo: 'cid:bwana-logo',
+      logo: 'cid:ogbonna-logo',
       globeIcon: 'cid:icon-globe',
-      linkedinIcon: 'cid:icon-linkedin',
     };
   }
 
@@ -96,15 +94,14 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
         contentType: string;
       }> = [];
 
-      const logoPath = path.join(assetsPath, 'bwana-logo.png');
+      const logoPath = path.join(assetsPath, 'ogbonna-logo.png');
       const globePath = path.join(assetsPath, 'globe.png');
-      const linkedinPath = path.join(assetsPath, 'linkedin.png');
 
       if (fs.existsSync(logoPath)) {
         attachments.push({
-          filename: 'bwana-logo.png',
+          filename: 'ogbonna-logo.png',
           content: fs.readFileSync(logoPath),
-          cid: 'bwana-logo',
+          cid: 'ogbonna-logo',
           contentType: 'image/png',
         });
       }
@@ -118,14 +115,14 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
         });
       }
 
-      if (fs.existsSync(linkedinPath)) {
-        attachments.push({
-          filename: 'linkedin.png',
-          content: fs.readFileSync(linkedinPath),
-          cid: 'icon-linkedin',
-          contentType: 'image/png',
-        });
-      }
+      // if (fs.existsSync(linkedinPath)) {
+      //   attachments.push({
+      //     filename: 'linkedin.png',
+      //     content: fs.readFileSync(linkedinPath),
+      //     cid: 'icon-linkedin',
+      //     contentType: 'image/png',
+      //   });
+      // }
 
       console.log(
         `[Email Template] Created ${attachments.length} CID image attachments`,
@@ -161,7 +158,7 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
   }
 
   /**
-   * Get base HTML structure following Bwana design
+   * Get base HTML structure following Ogbonna design
    * @param content - The main content to be placed in the white card
    * @param title - Email title for the HTML head
    * @param options - Additional options for customization
@@ -191,7 +188,7 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>${this.escapeHtml(title || 'Bwana Platform')}</title>
+  <title>${this.escapeHtml(title || 'Ogbonna Platform')}</title>
   <!--[if mso]>
   <noscript>
     <xml>
@@ -303,7 +300,6 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
     // Use CID references - images are embedded as attachments
     const logoUrl = this.imageCids.logo;
     const globeUrl = this.imageCids.globeIcon;
-    const linkedinUrl = this.imageCids.linkedinIcon;
 
     return `
           <!-- Header -->
@@ -313,7 +309,7 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
                 <tr>
                    <td align="left" style="width: 50%;">
                      <a href="${this.escapeHtml(websiteUrl)}" target="_blank" style="text-decoration: none;">
-                       <img src="${logoUrl}" alt="Bwana" width="132" height="30" style="display: block; border: 0; outline: none; max-width: 132px; height: auto;" />
+                       <img src="${logoUrl}" alt="Ogbonna" width="132" height="30" style="display: block; border: 0; outline: none; max-width: 132px; height: auto;" />
                      </a>
                    </td>
                    <td align="right" style="width: 50%;">
@@ -322,11 +318,6 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
                          <td style="padding-right: 24px;">
                            <a href="${this.escapeHtml(this.links.website)}" target="_blank" style="text-decoration: none;">
                              <img src="${globeUrl}" alt="Website" width="28" height="28" style="display: block; border: 0; outline: none;" />
-                           </a>
-                         </td>
-                         <td>
-                           <a href="${this.escapeHtml(this.links.linkedin)}" target="_blank" style="text-decoration: none;">
-                             <img src="${linkedinUrl}" alt="LinkedIn" width="28" height="28" style="display: block; border: 0; outline: none;" />
                            </a>
                          </td>
                        </tr>

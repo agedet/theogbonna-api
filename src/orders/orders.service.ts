@@ -4,10 +4,10 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { PrismaService } from '../database/prisma.service.js';
+import { DatabaseService } from '../database/database.service.js';
 import { UploadService } from '../upload/upload.service.js';
 import { CreateOrderDto } from './dto/create-order.dto.js';
-import { DeliveryOption, OrderStatus } from '@prisma/client';
+import { delivery_option, order_status } from '@prisma/client';
 import * as nodemailer from 'nodemailer';
 import { randomUUID } from 'crypto';
 
@@ -16,18 +16,18 @@ const HOST_PHONE     = '2347065606131'; // WhatsApp host number (no +)
 const HOST_EMAIL     = process.env.HOST_EMAIL ?? process.env.MAIL_USER ?? '';
 
 /** Flat delivery surcharges in GBP */
-const DELIVERY_FEES: Record<DeliveryOption, number> = {
-  [DeliveryOption.PICKUP]: 0,
-  [DeliveryOption.LAGOS]:  10,
-  [DeliveryOption.ABUJA]:  10,
-  [DeliveryOption.PORT_HARCOURT]: 6,
-  [DeliveryOption.ENUGU]:  6,
-  [DeliveryOption.ONITSHA]: 6,
-  [DeliveryOption.OTHER]:  10,
+const DELIVERY_FEES: Record<delivery_option, number> = {
+  [delivery_option.PICKUP]: 0,
+  [delivery_option.LAGOS]:  10,
+  [delivery_option.ABUJA]:  10,
+  [delivery_option.PORT_HARCOURT]: 6,
+  [delivery_option.ENUGU]:  6,
+  [delivery_option.ONITSHA]: 6,
+  [delivery_option.OTHER]:  10,
 };
 
-function deliveryLabel(opt: DeliveryOption): string {
-  if (opt === DeliveryOption.PICKUP) return 'Will Pickup (no delivery fee)';
+function deliveryLabel(opt: delivery_option): string {
+  if (opt === delivery_option.PICKUP) return 'Will Pickup (no delivery fee)';
   return opt.replace(/_/g, ' ');
 }
 
@@ -36,7 +36,7 @@ export class OrdersService {
   private readonly mailer: nodemailer.Transporter;
 
   constructor(
-    private readonly prisma:  PrismaService,
+    private readonly prisma:  DatabaseService,
     private readonly upload:  UploadService,
   ) {
     this.mailer = nodemailer.createTransport({
@@ -54,7 +54,7 @@ export class OrdersService {
 
   async create(dto: CreateOrderDto) {
     if (dto.paymentRef) {
-      const existing = await this.prisma.order.findUnique({
+      const existing = await this.prisma.orders.findUnique({
         where: { paymentRef: dto.paymentRef },
       });
       if (existing) {
@@ -65,23 +65,21 @@ export class OrdersService {
     const deliveryFee = DELIVERY_FEES[dto.deliveryOption] ?? 0;
     const totalPrice  = dto.quantity * UNIT_PRICE_GBP + deliveryFee;
 
-    // Upsert Attendee by email so re-orders are linked to the same record
-    const [firstName, ...rest] = dto.fullName.trim().split(' ');
-    const lastName = rest.join(' ') || firstName;
+    // Compose fullName for the orders table from the two separate fields
+    const firstName = dto.firstName.trim();
+    const lastName  = dto.lastName.trim();
+    const fullName  = `${firstName} ${lastName}`;
 
     try {
-      // Create or update the attendee record
-      const attendee = await this.prisma.attendee.upsert({
+      const attendee = await this.prisma.attendees.upsert({
         where:  { email: dto.email },
-        update: {
-          firstName,
-          lastName,
-        },
+        update: { firstName, lastName },
         create: {
+          id:              randomUUID(),
           firstName,
           lastName,
           email:           dto.email,
-          dob:             new Date('1900-01-01'), // placeholder — no DOB in order form
+          dob:             new Date('1900-01-01'),
           city:            '',
           state:           dto.deliveryState  ?? '',
           country:         'Nigeria',
@@ -89,9 +87,10 @@ export class OrdersService {
         },
       });
 
-      const order = await this.prisma.order.create({
+      const order = await this.prisma.orders.create({
         data: {
-          fullName:        dto.fullName,
+          id:              randomUUID(),
+          fullName,
           email:           dto.email,
           phone:           dto.phone,
           whatsapp:        dto.whatsapp,
@@ -103,6 +102,7 @@ export class OrdersService {
           deliveryState:   dto.deliveryState,
           paymentRef:      dto.paymentRef,
           attendeeId:      attendee.id,
+          updatedAt:       new Date(),
         },
       });
 
@@ -132,16 +132,15 @@ export class OrdersService {
     mimetype: string;
     filename: string;
   }) {
-    const order = await this.prisma.order.findUnique({
+    const order = await this.prisma.orders.findUnique({
       where:   { id: params.orderId },
-      include: { attendee: true },
+      include: { attendees: true },
     });
 
     if (!order) {
       throw new NotFoundException(`Order ${params.orderId} not found.`);
     }
 
-    // Upload file to Cloudinary — returns secure public URL
     const receiptUrl = await this.upload.uploadReceipt({
       buffer:   params.buffer,
       mimetype: params.mimetype,
@@ -150,20 +149,17 @@ export class OrdersService {
       fullName: order.fullName,
     });
 
-    // Persist the Drive URL and mark the order as CONFIRMED
-    const updated = await this.prisma.order.update({
+    const updated = await this.prisma.orders.update({
       where: { id: params.orderId },
-      data:  {
-        receiptUrl,
-        status: OrderStatus.CONFIRMED,
-      },
-      include: { attendee: true },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      data:  { receiptUrl, status: 'payment_proof_received' as any },
+      include: { attendees: true },
     });
 
-    // Create a Transaction record tied to both attendee and order
     if (order.attendeeId) {
-      await this.prisma.transaction.create({
+      await this.prisma.transactions.create({
         data: {
+          id:         randomUUID(),
           attendeeId: order.attendeeId,
           orderId:    order.id,
           amount:     order.totalPrice,
@@ -171,6 +167,7 @@ export class OrdersService {
           reference:  order.paymentRef ?? `REF-${randomUUID()}`,
           status:     'SUCCESS',
           receiptUrl,
+          updatedAt:  new Date(),
         },
       });
     }
@@ -191,16 +188,16 @@ export class OrdersService {
   // ── Queries ─────────────────────────────────────────────────────────────────
 
   async findAll() {
-    return this.prisma.order.findMany({
+    return this.prisma.orders.findMany({
       orderBy: { createdAt: 'desc' },
-      include: { attendee: true, transactions: true },
+      include: { attendees: true, transactions: true },
     });
   }
 
   async findOne(id: string) {
-    return this.prisma.order.findUnique({
+    return this.prisma.orders.findUnique({
       where:   { id },
-      include: { attendee: true, transactions: true },
+      include: { attendees: true, transactions: true },
     });
   }
 
@@ -213,7 +210,7 @@ export class OrdersService {
     phone:          string;
     quantity:       number;
     totalPrice:     number;
-    deliveryOption: DeliveryOption;
+    deliveryOption: delivery_option;
     deliveryAddress: string | null;
     deliveryState:  string | null;
     paymentRef:     string | null;
@@ -243,7 +240,7 @@ export class OrdersService {
   private async sendOrderReceivedEmail(order: {
     id: string; fullName: string; email: string;
     quantity: number; totalPrice: number;
-    deliveryOption: DeliveryOption; paymentRef: string | null;
+    deliveryOption: delivery_option; paymentRef: string | null;
   }) {
     await this.mailer.sendMail({
       from:    process.env.MAIL_FROM,
@@ -276,7 +273,7 @@ export class OrdersService {
   private async sendAdminOrderEmail(order: {
     id: string; fullName: string; email: string; phone: string;
     quantity: number; totalPrice: number;
-    deliveryOption: DeliveryOption; paymentRef: string | null;
+    deliveryOption: delivery_option; paymentRef: string | null;
   }) {
     await this.mailer.sendMail({
       from:    process.env.MAIL_FROM,
@@ -302,7 +299,7 @@ export class OrdersService {
   private async sendReceiptConfirmationEmail(order: {
     id: string; fullName: string; email: string;
     quantity: number; totalPrice: number;
-    deliveryOption: DeliveryOption;
+    deliveryOption: delivery_option;
   }, receiptUrl: string) {
     await this.mailer.sendMail({
       from:    process.env.MAIL_FROM,
@@ -331,7 +328,7 @@ export class OrdersService {
   private async sendHostReceiptEmail(order: {
     id: string; fullName: string; email: string; phone: string;
     quantity: number; totalPrice: number;
-    deliveryOption: DeliveryOption;
+    deliveryOption: delivery_option;
     deliveryAddress: string | null; deliveryState: string | null;
     paymentRef: string | null;
   }, receiptUrl: string) {
