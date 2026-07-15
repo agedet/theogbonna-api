@@ -54,6 +54,9 @@ async function bootstrap() {
         'http://127.0.0.1:5173',
         'http://127.0.0.1:5174',
         'http://127.0.0.1:5175',
+        'https://www.ogbonnasmemorial.com',
+        'https://ogbonnasmemorial.com',
+        'https://theogbonna.vercel.app',
       ];
 
 
