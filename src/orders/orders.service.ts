@@ -12,7 +12,7 @@ import { delivery_option, order_status } from '@prisma/client';
 import { randomUUID } from 'crypto';
 
 const UNIT_PRICE_GBP = 100;
-const HOST_PHONE     = '2347065606131'; // WhatsApp host number (no +)
+const HOST_PHONE     = '447958198281'; // WhatsApp host number (no +)
 const HOST_EMAIL     = process.env.HOST_EMAIL ?? '';
 
 /** Flat delivery surcharges in GBP */
