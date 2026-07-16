@@ -77,7 +77,7 @@ export class AdminService {
 
     // Build invitation link
     const frontendUrl = this.configService.get<string>('clientAppBaseUrl') ?? 'http://localhost:5173';
-    const invitationLink = `${frontendUrl}/admin/setup-password?token=${rawToken}&email=${encodeURIComponent(email)}`;
+    const invitationLink = `${frontendUrl}/admin/auth/setup-password?token=${rawToken}&email=${encodeURIComponent(email)}`;
 
     // Send invitation email
     await this.mailService.sendUserInvitationEmail(

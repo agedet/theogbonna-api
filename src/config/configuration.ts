@@ -21,7 +21,6 @@ export default () => ({
   backendUrl:
     process.env.BACKEND_URL || `http://localhost:${process.env.PORT || '3001'}`,
   clientAppBaseUrl:
-    process.env.CLIENT_APP_BASE_URL ||
     process.env.FRONTEND_URL ||
     'http://localhost:5173',
   database: {
