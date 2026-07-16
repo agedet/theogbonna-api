@@ -7,7 +7,7 @@ import { EmailTemplate } from '../constants/template-names';
  *
  * Supports three audience branches:
  *   role === 'admin'   → Ogbonna Memorial admin invitation (primary use-case)
- *   role === 'ENBROS'  → Internal Enbros team member (legacy)
+ *   role === 'SUPER_ADMIN'  → Internal Super Admin team member (legacy)
  *   anything else      → Generic partner/client invitation (legacy)
  */
 export class UserInvitationEmailTemplate extends BaseEmailTemplate {
@@ -17,7 +17,7 @@ export class UserInvitationEmailTemplate extends BaseEmailTemplate {
     const { userName = 'there', role, invitationLink, inviterName, isResend = false } = data;
 
     const isAdmin  = role === 'admin' || role === 'super_admin';
-    const isEnbros = role === 'ENBROS';
+    const isSuperAdmin = role === 'super_admin';
 
     let content: string;
     let title:   string;
@@ -32,12 +32,12 @@ export class UserInvitationEmailTemplate extends BaseEmailTemplate {
       title = isResend
         ? 'Reminder: Admin Account Invitation — Ogbonna Memorial'
         : 'You\'ve been invited as an Admin — Ogbonna Memorial';
-    } else if (isEnbros) {
-      content = this.renderEnbrosContent(userName as string, invitationLink as string, isResend as boolean);
-      title   = isResend ? 'Reminder: Join the Enbros Team' : 'Welcome to the Enbros Team';
+    } else if (isSuperAdmin) {
+      content = this.renderSuperAdminContent(userName as string, invitationLink as string, isResend as boolean);
+      title   = isResend ? 'Reminder: Join the Super Admin Team' : 'Welcome to the Super Admin Team';
     } else {
       content = this.renderPartnerContent(userName as string, invitationLink as string);
-      title   = 'Welcome to your project portal on Bwana';
+      title   = 'Welcome to your project portal on Ogbonna Memorial';
     }
 
     return this.getBaseHtml(content, title, undefined, data);
@@ -88,9 +88,9 @@ export class UserInvitationEmailTemplate extends BaseEmailTemplate {
     `;
   }
 
-  // ─── Legacy: ENBROS team member ──────────────────────────────────────────────
+  // ─── Legacy: Super Admin team member ──────────────────────────────────────────────
 
-  private renderEnbrosContent(userName: string, invitationLink?: string, isResend = false): string {
+  private renderSuperAdminContent(userName: string, invitationLink?: string, isResend = false): string {
     return `
       <h1 style="margin:0 0 8px 0;font-family:sans-serif;font-size:20px;font-weight:700;color:${this.colors.textStrong};">
         ${isResend ? 'Team Account Access Link' : 'Your Team Account is Ready'}
@@ -98,7 +98,7 @@ export class UserInvitationEmailTemplate extends BaseEmailTemplate {
       <div style="font-family:sans-serif;font-size:16px;line-height:24px;color:${this.colors.textStrong};">
         <p style="margin:0 0 16px 0;">Hello ${this.escapeHtml(userName)},</p>
         <p style="margin:0 0 16px 0;">
-          ${isResend ? 'Your administrator has resent your access link.' : 'Your administrator has created a team account for you on Bwana.'}
+          ${isResend ? 'Your administrator has resent your access link.' : 'Your administrator has created a team account for you on the Ogbonna Memorial.'}
         </p>
         <p style="margin:0 0 16px 0;">Please use the link below within the next 24 hours.</p>
       </div>
@@ -116,34 +116,34 @@ export class UserInvitationEmailTemplate extends BaseEmailTemplate {
   private renderPartnerContent(userName: string, invitationLink?: string): string {
     return `
       <h1 style="margin:0 0 16px 0;font-family:sans-serif;font-size:20px;font-weight:700;color:${this.colors.textStrong};">
-        Welcome to your project portal on Bwana
+        Welcome to your project portal on the Ogbonna Memorial
       </h1>
       <div style="font-family:sans-serif;font-size:16px;line-height:24px;color:${this.colors.textStrong};">
         <p style="margin:0 0 16px 0;">Hi ${this.escapeHtml(userName)},</p>
-        <p style="margin:0 0 16px 0;">Welcome to Bwana, your dedicated project hub with Enbros.</p>
+        <p style="margin:0 0 16px 0;">Welcome to the Ogbonna Memorial, your dedicated project hub.</p>
       </div>
-      ${invitationLink ? this.getButtonHtml('Log in to Bwana', invitationLink) : ''}
+      ${invitationLink ? this.getButtonHtml('Log in to the Ogbonna Memorial', invitationLink) : ''}
     `;
   }
 
   getSubject(data: MailTemplateData): string {
     const isAdmin  = data.role === 'admin' || data.role === 'super_admin';
-    const isEnbros = data.role === 'ENBROS';
+    const isSuperAdmin = data.role === 'super_admin';
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const isResend = data.isResend || false;
 
-    if (isAdmin) {
+    if (isAdmin || isSuperAdmin) {
       return isResend
-        ? 'Reminder: Set up your Ogbonna Memorial admin account'
+        ? 'Reminder: Set up your the Ogbonna Memorial admin account'
         : 'You\'ve been invited to the Ogbonna Memorial admin platform';
     }
 
-    if (isEnbros) {
+    if (isSuperAdmin) {
       return isResend
-        ? 'Action Required: Team Account Access Link - Bwana'
-        : 'Action Required: Your Team Account - Bwana';
+        ? 'Action Required: Team Account Access Link - the Ogbonna Memorial'
+        : 'Action Required: Your Team Account - the Ogbonna Memorial';
     }
 
-    return 'Welcome to your project portal on Bwana';
+    return 'Welcome to your project portal on Ogbonna Memorial';
   }
 }

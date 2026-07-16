@@ -5,13 +5,13 @@ import { EmailTemplate } from '../constants/template-names';
 /**
  * OTP Email Template
  * Used for login verification and password reset OTP codes
- * Design follows Bwana-v2 Figma specifications (node 344:2233)
+ * Design follows Ogbonna Memorial-v2 Figma specifications (node 344:2233)
  */
 export class OtpEmailTemplate extends BaseEmailTemplate {
   name = EmailTemplate.OTP;
 
-  // Additional color from Figma design
-  private readonly otpBgColor = '#EDECF3'; // Foundation/Purple/Light
+  // Soft amber surface for OTP code block (matches amber-50)
+  private readonly otpBgColor = '#FFFBEB';
 
   render(data: MailTemplateData): string {
     const { otpCode, userName = 'there', expirationMinutes = 10 } = data;
@@ -25,17 +25,17 @@ export class OtpEmailTemplate extends BaseEmailTemplate {
 
     const content = `
       <!-- Title -->
-      <h1 style="margin: 0 0 8px 0; font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; font-size: 20px; font-weight: 700; line-height: 28px; color: ${this.colors.textStrong};">
+      <h1 style="margin: 0 0 8px 0; font-family: Georgia, 'Times New Roman', serif; font-size: 22px; font-weight: 700; line-height: 28px; color: ${this.colors.textStrong};">
         Verify Your Account
       </h1>
       
       <!-- Greeting and intro -->
-      <div style="font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; font-size: 16px; line-height: 24px; color: ${this.colors.textStrong}; letter-spacing: -0.18px;">
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; font-size: 16px; line-height: 24px; color: ${this.colors.textStrong};">
         <p style="margin: 0; font-weight: 500;">
           Hey ${this.escapeHtml(userName)},
         </p>
         <p style="margin: 0 0 10px 0;">
-          We received a request to verify your account on the Bwana Portal.
+          We received a request to verify your account on the Ogbonna Memorial Portal.
         </p>
         <p style="margin: 0 0 10px 0;">
           To proceed, please use the following One-Time Password (OTP):
@@ -43,16 +43,16 @@ export class OtpEmailTemplate extends BaseEmailTemplate {
       </div>
       
       <!-- OTP Code Box -->
-      <div style="background-color: ${this.otpBgColor}; padding: 10px; margin: 0 0 10px 0; text-align: center;">
-        <p style="margin: 0; font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; font-size: 16px; font-weight: 500; line-height: 24px; color: ${this.colors.textStrong}; letter-spacing: 3.84px;">
+      <div style="background-color: ${this.otpBgColor}; border: 1px solid rgba(217,119,6,0.25); border-radius: 12px; padding: 16px; margin: 0 0 16px 0; text-align: center;">
+        <p style="margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 22px; font-weight: 600; line-height: 28px; color: ${this.colors.primary}; letter-spacing: 0.35em;">
           ${formattedOtp}
         </p>
       </div>
       
       <!-- Note and security message -->
-      <div style="font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; font-size: 16px; line-height: 24px; color: ${this.colors.textStrong}; letter-spacing: -0.18px;">
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; font-size: 16px; line-height: 24px; color: ${this.colors.textStrong};">
         <p style="margin: 0 0 16px 0;">
-          <strong style="font-weight: 500;">Note:</strong> This code is valid for ${expirationMinutes} minutes. For your security, please do not share this code with anyone.
+          <strong style="font-weight: 600;">Note:</strong> This code is valid for ${expirationMinutes} minutes. For your security, please do not share this code with anyone.
         </p>
         
         <p style="margin: 0;">
@@ -89,6 +89,6 @@ export class OtpEmailTemplate extends BaseEmailTemplate {
   }
 
   getSubject(_data: MailTemplateData): string {
-    return 'Your Verification Code - Bwana';
+    return 'Your Verification Code - Ogbonna Memorial';
   }
 }

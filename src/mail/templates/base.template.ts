@@ -4,74 +4,59 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 /**
- * Base email template class - Ogbonna Platform Design
- * All email templates should extend this class
+ * Base email template — Ogbonna Memorial brand
  *
- * Design based on Figma: Ogbonna-v2 Email Template
- * - Gradient background (blue to purple/orange)
- * - White header with logo and social icons
- * - White content card with shadow
- * - Purple accent color (#4C4185)
+ * Matches the frontend memorial site:
+ * - Dark slate surfaces (slate-950)
+ * - Amber accents (amber-500 / amber-600)
+ * - Embedded CID logo from public/email-assets
  */
 export abstract class BaseEmailTemplate implements IEmailTemplate {
   abstract name: string;
 
-  // Design tokens from Figma
+  /** Brand tokens aligned with Tailwind amber / slate used in theogbonna */
   protected readonly colors = {
-    primary: '#4C4185', // Foundation/Purple/Normal
-    textStrong: '#0E121B', // Text/Strong
-    textSub: '#525866', // Text/Sub
-    textSoft: '#99A0AE', // Text/Soft
+    primary: '#D97706', // amber-600 — CTAs
+    primaryHover: '#B45309', // amber-700
+    accent: '#F59E0B', // amber-500
+    accentSoft: '#FBBF24', // amber-400
+    textStrong: '#0F172A', // slate-900 — body text on white cards
+    textSub: '#64748B', // slate-500
+    textSoft: '#94A3B8', // slate-400
+    textOnDark: '#E2E8F0', // slate-200
     white: '#FFFFFF',
-    bgGradientStart: '#25B2E2', // Blue gradient start
-    bgGradientEnd: '#E8A87C', // Orange/warm gradient end
-    strokeSoft: '#E1E4EA',
+    bgPage: '#020617', // slate-950
+    bgHeader: '#0F172A', // slate-900
+    bgGradientStart: '#0F172A', // slate-900
+    bgGradientMid: '#1C1917', // warm near-black
+    bgGradientEnd: '#78350F', // amber-900
+    strokeSoft: '#E2E8F0', // slate-200
+    otpBg: '#FFFBEB', // amber-50
   };
 
-  /**
-   * Render the email template with provided data
-   */
   abstract render(data: MailTemplateData): string;
 
-  /**
-   * Get email subject (optional override)
-   */
   getSubject(data: MailTemplateData): string {
-    return data.subject || 'Notification';
+    return data.subject || 'Ogbonna Memorial';
   }
 
-  /**
-   * Escape HTML to prevent XSS attacks
-   * @param text - Text to escape
-   * @returns Escaped HTML string
-   */
   protected escapeHtml(text: string | undefined | null): string {
     if (!text) return '';
     return he.encode(text, { useNamedReferences: false });
   }
 
-  // External links - ogbonna company links
   protected readonly links = {
     website: 'https://www.ogbonnasmemorial.com/',
-    contact: 'https://www.ogbonnasmemorial.com/contact',
+    contact: 'https://www.ogbonnasmemorial.com/#invitation',
     supportEmail: 'info@ogbonnasmemorial.com',
   };
 
-  // CID references for embedded images
-  // Using CID (Content-ID) attachments is more reliable than URL-based images
-  // because email clients often block external images or URLs may be inaccessible
   protected get imageCids() {
     return {
       logo: 'cid:ogbonna-logo',
-      globeIcon: 'cid:icon-globe',
     };
   }
 
-  /**
-   * Get image attachments for email (CID embedded images)
-   * These are attached to the email and referenced via cid: URLs
-   * Works reliably in all email clients and environments
-   */
   getImageAttachments(): Array<{
     filename: string;
     content: Buffer;
@@ -82,7 +67,7 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
       const assetsPath = this.findAssetsPath();
       if (!assetsPath) {
         console.warn(
-          '[Email Template] Assets folder not found, skipping image attachments',
+          '[Email Template] Assets folder not found — logo will be missing. Expected public/email-assets/ogbonna-logo.png',
         );
         return [];
       }
@@ -95,8 +80,6 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
       }> = [];
 
       const logoPath = path.join(assetsPath, 'ogbonna-logo.png');
-      const globePath = path.join(assetsPath, 'globe.png');
-
       if (fs.existsSync(logoPath)) {
         attachments.push({
           filename: 'ogbonna-logo.png',
@@ -104,42 +87,17 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
           cid: 'ogbonna-logo',
           contentType: 'image/png',
         });
+      } else {
+        console.warn(`[Email Template] Logo not found at ${logoPath}`);
       }
 
-      if (fs.existsSync(globePath)) {
-        attachments.push({
-          filename: 'globe.png',
-          content: fs.readFileSync(globePath),
-          cid: 'icon-globe',
-          contentType: 'image/png',
-        });
-      }
-
-      // if (fs.existsSync(linkedinPath)) {
-      //   attachments.push({
-      //     filename: 'linkedin.png',
-      //     content: fs.readFileSync(linkedinPath),
-      //     cid: 'icon-linkedin',
-      //     contentType: 'image/png',
-      //   });
-      // }
-
-      console.log(
-        `[Email Template] Created ${attachments.length} CID image attachments`,
-      );
       return attachments;
     } catch (error) {
-      console.error(
-        '[Email Template] Error creating image attachments:',
-        error,
-      );
+      console.error('[Email Template] Error creating image attachments:', error);
       return [];
     }
   }
 
-  /**
-   * Find the email assets folder (works in both dev and production)
-   */
   private findAssetsPath(): string | null {
     const cwd = process.cwd();
     const possiblePaths = [
@@ -157,13 +115,6 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
     return null;
   }
 
-  /**
-   * Get base HTML structure following Ogbonna design
-   * @param content - The main content to be placed in the white card
-   * @param title - Email title for the HTML head
-   * @param options - Additional options for customization
-   * @param data - Template data (contains backendUrl)
-   */
   protected getBaseHtml(
     content: string,
     title?: string,
@@ -173,7 +124,7 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
       contactEmail?: string;
       websiteUrl?: string;
     },
-    data?: MailTemplateData,
+    _data?: MailTemplateData,
   ): string {
     const {
       showHeader = true,
@@ -188,7 +139,7 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>${this.escapeHtml(title || 'Ogbonna Platform')}</title>
+  <title>${this.escapeHtml(title || 'Ogbonna Memorial')}</title>
   <!--[if mso]>
   <noscript>
     <xml>
@@ -199,7 +150,6 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
   </noscript>
   <![endif]-->
   <style type="text/css">
-    /* Reset styles */
     body, table, td, p, a, li, blockquote {
       -webkit-text-size-adjust: 100%;
       -ms-text-size-adjust: 100%;
@@ -216,7 +166,6 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
       outline: none;
       text-decoration: none;
     }
-    /* iOS blue links */
     a[x-apple-data-detectors] {
       color: inherit !important;
       text-decoration: none !important;
@@ -225,7 +174,6 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
       font-weight: inherit !important;
       line-height: inherit !important;
     }
-    /* Gmail blue links */
     u + #body a {
       color: inherit;
       text-decoration: none;
@@ -236,34 +184,30 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
     }
   </style>
 </head>
-<body id="body" style="margin: 0; padding: 0; width: 100%; background-color: #f5f5f5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+<body id="body" style="margin: 0; padding: 0; width: 100%; background-color: ${this.colors.bgPage}; font-family: Georgia, 'Times New Roman', Times, serif;">
   
-  <!-- Outer wrapper -->
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f5f5f5;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: ${this.colors.bgPage};">
     <tr>
       <td align="center" style="padding: 0;">
         
-        <!-- Email container -->
         <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; width: 100%;">
           
           ${showHeader ? this.getHeaderHtml(websiteUrl) : ''}
           
-          <!-- Background section with gradient effect -->
           <tr>
-            <td style="background: linear-gradient(135deg, ${this.colors.bgGradientStart} 0%, #7B68A8 50%, ${this.colors.bgGradientEnd} 100%); padding: 40px 20px;">
+            <td style="background: linear-gradient(160deg, ${this.colors.bgGradientStart} 0%, ${this.colors.bgGradientMid} 45%, ${this.colors.bgGradientEnd} 100%); padding: 40px 20px;">
               <!--[if mso]>
               <v:rect xmlns:v="urn:schemas-microsoft-com:vml" fill="true" stroke="false" style="width:600px;">
-                <v:fill type="gradient" color="${this.colors.bgGradientStart}" color2="${this.colors.bgGradientEnd}" angle="135"/>
+                <v:fill type="gradient" color="${this.colors.bgGradientStart}" color2="${this.colors.bgGradientEnd}" angle="160"/>
                 <v:textbox style="mso-fit-shape-to-text:true" inset="0,0,0,0">
               <![endif]-->
               
-              <!-- White content card -->
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
                   <td align="center">
-                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 500px; background-color: ${this.colors.white}; border-radius: 10px; box-shadow: 0 8px 50px 6px rgba(0,0,0,0.15), 0 4px 50px 0 rgba(0,0,0,0.15);">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 500px; background-color: ${this.colors.white}; border-radius: 16px; border: 1px solid rgba(245,158,11,0.25); box-shadow: 0 12px 40px rgba(0,0,0,0.35);">
                       <tr>
-                        <td style="padding: 40px;">
+                        <td style="padding: 40px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
                           ${content}
                         </td>
                       </tr>
@@ -291,37 +235,22 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
 </html>`;
   }
 
-  /**
-   * Get header HTML with logo and social icons
-   * Uses CID embedded images for maximum email client compatibility
-   * Images are attached to the email and referenced via cid: URLs
-   */
   protected getHeaderHtml(websiteUrl: string): string {
-    // Use CID references - images are embedded as attachments
     const logoUrl = this.imageCids.logo;
-    const globeUrl = this.imageCids.globeIcon;
 
     return `
           <!-- Header -->
           <tr>
-            <td style="background-color: ${this.colors.white}; padding: 20px 40px;">
+            <td style="background-color: ${this.colors.bgHeader}; padding: 28px 40px; border-bottom: 1px solid rgba(245,158,11,0.25);">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
-                   <td align="left" style="width: 50%;">
+                   <td align="center">
                      <a href="${this.escapeHtml(websiteUrl)}" target="_blank" style="text-decoration: none;">
-                       <img src="${logoUrl}" alt="Ogbonna" width="132" height="30" style="display: block; border: 0; outline: none; max-width: 132px; height: auto;" />
+                       <img src="${logoUrl}" alt="Ogbonna Memorial" width="160" height="64" style="display: block; margin: 0 auto; border: 0; outline: none; max-width: 160px; height: auto;" />
                      </a>
-                   </td>
-                   <td align="right" style="width: 50%;">
-                     <table role="presentation" cellpadding="0" cellspacing="0" border="0">
-                       <tr>
-                         <td style="padding-right: 24px;">
-                           <a href="${this.escapeHtml(this.links.website)}" target="_blank" style="text-decoration: none;">
-                             <img src="${globeUrl}" alt="Website" width="28" height="28" style="display: block; border: 0; outline: none;" />
-                           </a>
-                         </td>
-                       </tr>
-                     </table>
+                     <p style="margin: 12px 0 0 0; font-family: Georgia, 'Times New Roman', serif; font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: ${this.colors.accent};">
+                       In Loving Memory
+                     </p>
                    </td>
                 </tr>
               </table>
@@ -329,28 +258,27 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
           </tr>`;
   }
 
-  /**
-   * Get footer HTML
-   */
   protected getFooterHtml(contactEmail: string, websiteUrl: string): string {
     return `
           <!-- Footer -->
           <tr>
-            <td style="background-color: transparent; padding: 30px 20px; text-align: center;">
-              <p style="margin: 0 0 10px 0; font-size: 14px; line-height: 20px; color: ${this.colors.textSoft};">
-                © ${new Date().getFullYear()} Enbros. All rights reserved.
+            <td style="background-color: ${this.colors.bgPage}; padding: 32px 24px; text-align: center; border-top: 1px solid rgba(245,158,11,0.15);">
+              <p style="margin: 0 0 8px 0; font-family: Georgia, 'Times New Roman', serif; font-size: 14px; line-height: 22px; color: ${this.colors.textSoft};">
+                © ${new Date().getFullYear()} Ogbonna Memorial. All rights reserved.
               </p>
-              <p style="margin: 0; font-size: 12px; line-height: 18px; color: ${this.colors.textSoft};">
-                Questions? 
-                <a href="${this.escapeHtml(this.links.contact)}" style="color: ${this.colors.primary}; text-decoration: underline;">Contact us</a>
+              <p style="margin: 0 0 12px 0; font-size: 12px; line-height: 18px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; color: ${this.colors.textSoft};">
+                <a href="${this.escapeHtml(websiteUrl)}" style="color: ${this.colors.accent}; text-decoration: none;">www.ogbonnasmemorial.com</a>
+                &nbsp;·&nbsp;
+                <a href="mailto:${this.escapeHtml(contactEmail)}" style="color: ${this.colors.accent}; text-decoration: none;">${this.escapeHtml(contactEmail)}</a>
+              </p>
+              <p style="margin: 0; font-size: 12px; line-height: 18px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; color: ${this.colors.textSoft};">
+                Questions?
+                <a href="mailto:${this.escapeHtml(contactEmail)}" style="color: ${this.colors.accent}; text-decoration: underline;">Contact us</a>
               </p>
             </td>
           </tr>`;
   }
 
-  /**
-   * Get styled button HTML
-   */
   protected getButtonHtml(
     text: string,
     href: string,
@@ -362,30 +290,37 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
       <table role="presentation" width="${fullWidth ? '100%' : 'auto'}" cellpadding="0" cellspacing="0" border="0" style="margin: 24px 0;">
         <tr>
           <td align="center">
+            <!--[if mso]>
+            <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${this.escapeHtml(href)}" style="height:48px;v-text-anchor:middle;width:280px;" arcsize="20%" stroke="f" fillcolor="${this.colors.primary}">
+              <w:anchorlock/>
+              <center style="color:#ffffff;font-family:sans-serif;font-size:14px;font-weight:600;">
+                ${this.escapeHtml(text)}
+              </center>
+            </v:roundrect>
+            <![endif]-->
+            <!--[if !mso]><!-->
             <a href="${this.escapeHtml(href)}" target="_blank" style="
               display: inline-block;
               background-color: ${this.colors.primary};
               color: ${this.colors.white};
               font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
               font-size: 14px;
-              font-weight: 500;
+              font-weight: 600;
               line-height: 20px;
               text-align: center;
               text-decoration: none;
-              padding: 12px 24px;
-              border-radius: 10px;
+              padding: 14px 28px;
+              border-radius: 12px;
               ${fullWidth ? 'width: 100%; box-sizing: border-box;' : ''}
             ">
               ${this.escapeHtml(text)}
             </a>
+            <!--<![endif]-->
           </td>
         </tr>
       </table>`;
   }
 
-  /**
-   * Get styled divider HTML
-   */
   protected getDividerHtml(): string {
     return `
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 24px 0;">
@@ -395,14 +330,11 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
       </table>`;
   }
 
-  /**
-   * Get styled help text HTML
-   */
   protected getHelpTextHtml(): string {
     return `
-      <p style="margin: 24px 0 0 0; font-size: 16px; line-height: 24px; color: ${this.colors.textStrong}; text-align: center;">
-        Having troubles with your account? 
-        <a href="${this.escapeHtml(this.links.contact)}" target="_blank" style="color: ${this.colors.primary}; font-weight: 700; text-decoration: underline;">Contact us</a>
+      <p style="margin: 24px 0 0 0; font-size: 14px; line-height: 22px; color: ${this.colors.textSub}; text-align: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;">
+        Having trouble?
+        <a href="mailto:${this.escapeHtml(this.links.supportEmail)}" target="_blank" style="color: ${this.colors.primary}; font-weight: 700; text-decoration: underline;">Contact us</a>
       </p>`;
   }
 }

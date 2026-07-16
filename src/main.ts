@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module.js';
 import { ConfigService } from '@nestjs/config';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import {
   createCorsOptions,
   resolveAllowedOrigins,
@@ -14,6 +15,14 @@ async function bootstrap() {
 
   // Trust proxy (important for correct IP detection and HTTPS detection)
   app.getHttpAdapter().getInstance().set('trust proxy', true);
+
+  // Required so JwtStrategy can read accessToken / refreshToken from req.cookies
+  app.use(
+    cookieParser(
+      configService.get<string>('security.cookieSecret') ||
+        process.env.COOKIE_SECRET,
+    ),
+  );
 
   // Global validation — strips unknown fields, returns readable error messages
   app.useGlobalPipes(

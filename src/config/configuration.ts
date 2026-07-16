@@ -29,6 +29,11 @@ export default () => ({
   security: {
     cookieSecret: process.env.COOKIE_SECRET || 'default-cookie-secret',
     jwtSecret: process.env.JWT_SECRET || 'default-jwt-secret',
+    /**
+     * Shared cookie domain for www + api subdomains.
+     * Example: .ogbonnasmemorial.com
+     */
+    cookieDomain: process.env.COOKIE_DOMAIN || undefined,
   },
   rateLimit: {
     ttl: parseInt(process.env.RATE_LIMIT_TTL || '60', 10),
