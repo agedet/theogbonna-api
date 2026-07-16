@@ -5,7 +5,7 @@ import { EmailTemplate } from '../constants/template-names';
 /**
  * OTP Email Template
  * Used for login verification and password reset OTP codes
- * Design follows Bwana-v2 Figma specifications (node 344:2233)
+ * Design follows Ogbonna Memorial-v2 Figma specifications (node 344:2233)
  */
 export class OtpEmailTemplate extends BaseEmailTemplate {
   name = EmailTemplate.OTP;
@@ -35,7 +35,7 @@ export class OtpEmailTemplate extends BaseEmailTemplate {
           Hey ${this.escapeHtml(userName)},
         </p>
         <p style="margin: 0 0 10px 0;">
-          We received a request to verify your account on the Bwana Portal.
+          We received a request to verify your account on the Ogbonna Memorial Portal.
         </p>
         <p style="margin: 0 0 10px 0;">
           To proceed, please use the following One-Time Password (OTP):
@@ -89,6 +89,6 @@ export class OtpEmailTemplate extends BaseEmailTemplate {
   }
 
   getSubject(_data: MailTemplateData): string {
-    return 'Your Verification Code - Bwana';
+    return 'Your Verification Code - Ogbonna Memorial';
   }
 }

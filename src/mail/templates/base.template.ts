@@ -338,7 +338,7 @@ export abstract class BaseEmailTemplate implements IEmailTemplate {
           <tr>
             <td style="background-color: transparent; padding: 30px 20px; text-align: center;">
               <p style="margin: 0 0 10px 0; font-size: 14px; line-height: 20px; color: ${this.colors.textSoft};">
-                © ${new Date().getFullYear()} Enbros. All rights reserved.
+                © ${new Date().getFullYear()} Ogbonna. All rights reserved.
               </p>
               <p style="margin: 0; font-size: 12px; line-height: 18px; color: ${this.colors.textSoft};">
                 Questions? 
