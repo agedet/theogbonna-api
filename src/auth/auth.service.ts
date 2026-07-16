@@ -195,7 +195,7 @@ export class AuthService {
     if (!isEmailVerified) {
       const authUser = await this.prisma.users.findUnique({
         where: { id: user.id },
-        select: { email_confirmed_at: true },
+        select: { email_confirmed_at: true, invited_at: true },
       });
 
       if (authUser?.email_confirmed_at) {
@@ -203,6 +203,23 @@ export class AuthService {
           where: { id: user.id },
           data: { is_email_verified: true },
         });
+        isEmailVerified = true;
+      } else if (
+        // Invited admins already proved email ownership via the invitation link.
+        // Without this, login returns no sessionToken and OTP verify fails with 401.
+        authUser?.invited_at &&
+        (profile?.role === role.admin || profile?.role === role.super_admin)
+      ) {
+        await this.prisma.$transaction([
+          this.prisma.users.update({
+            where: { id: user.id },
+            data: { email_confirmed_at: new Date() },
+          }),
+          this.prisma.profile.update({
+            where: { id: user.id },
+            data: { is_email_verified: true },
+          }),
+        ]);
         isEmailVerified = true;
       }
     }
@@ -659,21 +676,33 @@ export class AuthService {
 
     const hashedPassword = await bcrypt.hash(newPassword, 12);
 
-    await this.prisma.users.update({
-      where: { id: user.id },
-      data: {
-        encrypted_password: hashedPassword,
-        recovery_token: null,
-        recovery_sent_at: null,
-        last_sign_in_at: new Date(),
-      },
-    });
+    await this.prisma.$transaction([
+      this.prisma.users.update({
+        where: { id: user.id },
+        data: {
+          encrypted_password: hashedPassword,
+          recovery_token: null,
+          recovery_sent_at: null,
+          email_confirmed_at: new Date(),
+          last_sign_in_at: new Date(),
+        },
+      }),
+      this.prisma.profile.update({
+        where: { id: user.id },
+        data: { is_email_verified: true },
+      }),
+    ]);
 
     await this.revokeRefreshTokens(user.id);
 
     return {
       message: 'Password set up successfully. You can now log in.',
-      user: this.buildAuthUser(user),
+      user: this.buildAuthUser({
+        ...user,
+        profile: user.profile
+          ? { ...user.profile, is_email_verified: true }
+          : user.profile,
+      }),
     };
   }
 

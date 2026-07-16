@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -19,6 +20,8 @@ import { CurrentUser } from '../common/decorators/current-user.dto.js';
 import { AdminService } from './admin.service.js';
 import { InviteAdminDto } from './dto/invite-admin.dto.js';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto.js';
+import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto.js';
+import { UpdateAdminRoleDto } from './dto/update-admin-role.dto.js';
 
 interface AuthUser { id: string; role: role; }
 
@@ -44,8 +47,36 @@ export class AdminController {
   @Get('admins')
   @Roles(role.super_admin)
   @ApiOperation({ summary: 'Super-admin: list all admin accounts' })
-  listAdmins() {
-    return this.adminService.listAdmins();
+  @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'page',   required: false, type: Number })
+  @ApiQuery({ name: 'limit',  required: false, type: Number })
+  listAdmins(
+    @Query('search') search?: string,
+    @Query('page',  new DefaultValuePipe(1), ParseIntPipe) page: number = 1,
+    @Query('limit', new DefaultValuePipe(6), ParseIntPipe) limit: number = 6,
+  ) {
+    return this.adminService.listAdmins({ search, page, limit });
+  }
+
+  @Patch('admins/:id/role')
+  @Roles(role.super_admin)
+  @ApiOperation({ summary: 'Super-admin: update an admin user role' })
+  updateAdminRole(
+    @Param('id') id: string,
+    @Body() dto: UpdateAdminRoleDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.adminService.updateAdminRole(id, dto, user.id);
+  }
+
+  @Delete('admins/:id')
+  @Roles(role.super_admin)
+  @ApiOperation({ summary: 'Super-admin: delete an admin user' })
+  deleteAdmin(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.adminService.deleteAdmin(id, user.id);
   }
 
   @Get('activity')
@@ -56,6 +87,16 @@ export class AdminController {
     @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit: number,
   ) {
     return this.adminService.getActivityLog(limit);
+  }
+
+  @Delete('attendees/:id')
+  @Roles(role.super_admin)
+  @ApiOperation({ summary: 'Super-admin: delete an attendee' })
+  deleteAttendee(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.adminService.deleteAttendee(id, user.id);
   }
 
   // ── Admin + super-admin ─────────────────────────────────────────────────────
@@ -101,6 +142,16 @@ export class AdminController {
     return this.adminService.updateOrderStatus(id, dto, user.id);
   }
 
+  @Delete('orders/:id')
+  @Roles(role.super_admin)
+  @ApiOperation({ summary: 'Super-admin: delete an order' })
+  deleteOrder(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.adminService.deleteOrder(id, user.id);
+  }
+
   @Get('payments')
   @Roles(role.admin, role.super_admin)
   @ApiOperation({ summary: 'List all payment transactions' })
@@ -115,5 +166,40 @@ export class AdminController {
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number = 20,
   ) {
     return this.adminService.getPayments({ status, search, page, limit });
+  }
+
+  @Patch('payments/:id/status')
+  @Roles(role.admin, role.super_admin)
+  @ApiOperation({ summary: 'Update payment status' })
+  updatePaymentStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdatePaymentStatusDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.adminService.updatePaymentStatus(id, dto, user.id);
+  }
+
+  @Delete('payments/:id')
+  @Roles(role.super_admin)
+  @ApiOperation({ summary: 'Super-admin: delete a payment' })
+  deletePayment(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.adminService.deletePayment(id, user.id);
+  }
+
+  @Get('attendees')
+  @Roles(role.admin, role.super_admin)
+  @ApiOperation({ summary: 'List all attendees' })
+  @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'page',   required: false, type: Number })
+  @ApiQuery({ name: 'limit',  required: false, type: Number })
+  getAttendees(
+    @Query('search') search?: string,
+    @Query('page',  new DefaultValuePipe(1),  ParseIntPipe) page:  number = 1,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number = 20,
+  ) {
+    return this.adminService.getAttendees({ search, page, limit });
   }
 }

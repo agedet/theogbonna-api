@@ -3,12 +3,15 @@ import {
   ConflictException,
   NotFoundException,
   Logger,
+  BadRequestException,
 } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service.js';
 import { MailService } from '../mail/mail.service.js';
 import { ConfigService } from '@nestjs/config';
 import { InviteAdminDto } from './dto/invite-admin.dto.js';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto.js';
+import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto.js';
+import { UpdateAdminRoleDto } from './dto/update-admin-role.dto.js';
 import { role } from '@prisma/client';
 import { randomUUID } from 'crypto';
 
@@ -98,32 +101,171 @@ export class AdminService {
 
   // ── List all admins (super-admin only) ─────────────────────────────────────
 
-  async listAdmins() {
-    const profiles = await this.prisma.profile.findMany({
-      where: { role: { in: [role.admin, role.super_admin] } },
-      orderBy: { created_at: 'desc' },
-      select: {
-        id:         true,
-        email:      true,
-        first_name: true,
-        last_name:  true,
-        job_title:  true,
-        role:       true,
-        created_at: true,
-        is_email_verified: true,
+  async listAdmins(filters: {
+    search?: string;
+    page?: number;
+    limit?: number;
+  } = {}) {
+    const page  = Math.max(1, filters.page  ?? 1);
+    const limit = Math.min(100, filters.limit ?? 6);
+    const skip  = (page - 1) * limit;
+
+    const where: Record<string, unknown> = {
+      role: { in: [role.admin, role.super_admin] },
+      users: { deleted_at: null },
+    };
+
+    if (filters.search) {
+      where.OR = [
+        { email:      { contains: filters.search, mode: 'insensitive' } },
+        { first_name: { contains: filters.search, mode: 'insensitive' } },
+        { last_name:  { contains: filters.search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [profiles, total] = await Promise.all([
+      this.prisma.profile.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        skip,
+        take: limit,
+        select: {
+          id:         true,
+          email:      true,
+          first_name: true,
+          last_name:  true,
+          job_title:  true,
+          role:       true,
+          created_at: true,
+          is_email_verified: true,
+        },
+      }),
+      this.prisma.profile.count({ where }),
+    ]);
+
+    return {
+      data: profiles.map(p => ({
+        id:               p.id,
+        email:            p.email,
+        firstName:        p.first_name,
+        lastName:         p.last_name,
+        jobTitle:         p.job_title,
+        role:             p.role,
+        isEmailVerified:  p.is_email_verified,
+        createdAt:        p.created_at,
+      })),
+      meta: { total, page, limit, pages: Math.ceil(total / limit) },
+    };
+  }
+
+  async updateAdminRole(
+    targetUserId: string,
+    dto: UpdateAdminRoleDto,
+    actorUserId: string,
+  ) {
+    if (targetUserId === actorUserId) {
+      throw new BadRequestException('You cannot change your own role.');
+    }
+
+    const profile = await this.prisma.profile.findFirst({
+      where: { id: targetUserId, users: { deleted_at: null } },
+    });
+    if (!profile) throw new NotFoundException('User not found.');
+
+    if (
+      profile.role === role.super_admin &&
+      dto.role !== role.super_admin
+    ) {
+      const superAdminCount = await this.prisma.profile.count({
+        where: {
+          role: role.super_admin,
+          users: { deleted_at: null },
+        },
+      });
+      if (superAdminCount <= 1) {
+        throw new BadRequestException('Cannot demote the last super admin.');
+      }
+    }
+
+    const updated = await this.prisma.profile.update({
+      where: { id: targetUserId },
+      data: { role: dto.role },
+    });
+
+    await this.prisma.admin_activity_log.create({
+      data: {
+        user_id:       actorUserId,
+        activity:      `Updated user role: ${profile.email} → ${dto.role}`,
+        activity_type: 'USER_ROLE_UPDATE',
+        details:       `${profile.email} role changed from ${profile.role} to ${dto.role}`,
+        metadata:      {
+          targetUserId,
+          previousRole: profile.role,
+          newRole: dto.role,
+        },
       },
     });
 
-    return profiles.map(p => ({
-      id:               p.id,
-      email:            p.email,
-      firstName:        p.first_name,
-      lastName:         p.last_name,
-      jobTitle:         p.job_title,
-      role:             p.role,
-      isEmailVerified:  p.is_email_verified,
-      createdAt:        p.created_at,
-    }));
+    return {
+      id:              updated.id,
+      email:           updated.email,
+      firstName:       updated.first_name,
+      lastName:        updated.last_name,
+      jobTitle:        updated.job_title,
+      role:            updated.role,
+      isEmailVerified: updated.is_email_verified,
+      createdAt:       updated.created_at,
+    };
+  }
+
+  async deleteAdmin(targetUserId: string, actorUserId: string) {
+    if (targetUserId === actorUserId) {
+      throw new BadRequestException('You cannot delete your own account.');
+    }
+
+    const profile = await this.prisma.profile.findFirst({
+      where: { id: targetUserId, users: { deleted_at: null } },
+    });
+    if (!profile) throw new NotFoundException('User not found.');
+
+    if (profile.role === role.super_admin) {
+      const superAdminCount = await this.prisma.profile.count({
+        where: {
+          role: role.super_admin,
+          users: { deleted_at: null },
+        },
+      });
+      if (superAdminCount <= 1) {
+        throw new BadRequestException('Cannot delete the last super admin.');
+      }
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.refresh_tokens.updateMany({
+        where: { user_id: targetUserId, revoked: { not: true } },
+        data: { revoked: true },
+      }),
+      this.prisma.users.update({
+        where: { id: targetUserId },
+        data: {
+          deleted_at: new Date(),
+          recovery_token: null,
+          recovery_sent_at: null,
+        },
+      }),
+    ]);
+
+    await this.prisma.admin_activity_log.create({
+      data: {
+        user_id:       actorUserId,
+        activity:      `Deleted admin: ${profile.email}`,
+        activity_type: 'ADMIN_DELETE',
+        details:       `${profile.first_name} ${profile.last_name} (${profile.email}) deleted`,
+        metadata:      { targetUserId, email: profile.email, role: profile.role },
+      },
+    });
+
+    return { message: `Admin ${profile.email} has been deleted.` };
   }
 
   // ── Orders (admin + super-admin) ────────────────────────────────────────────
@@ -206,6 +348,28 @@ export class AdminService {
     return updated;
   }
 
+  async deleteOrder(id: string, adminUserId: string) {
+    const order = await this.prisma.orders.findUnique({ where: { id } });
+    if (!order) throw new NotFoundException(`Order ${id} not found.`);
+
+    await this.prisma.$transaction([
+      this.prisma.transactions.deleteMany({ where: { orderId: id } }),
+      this.prisma.orders.delete({ where: { id } }),
+    ]);
+
+    await this.prisma.admin_activity_log.create({
+      data: {
+        user_id:       adminUserId,
+        activity:      `Deleted order: ${id}`,
+        activity_type: 'ORDER_DELETE',
+        details:       `Order for ${order.fullName} (${order.email}) deleted`,
+        metadata:      { orderId: id, email: order.email },
+      },
+    });
+
+    return { message: `Order ${id} has been deleted.` };
+  }
+
   // ── Payments (transactions) ─────────────────────────────────────────────────
 
   async getPayments(filters: {
@@ -247,6 +411,129 @@ export class AdminService {
       data: transactions,
       meta: { total, page, limit, pages: Math.ceil(total / limit) },
     };
+  }
+
+  async updatePaymentStatus(
+    id: string,
+    dto: UpdatePaymentStatusDto,
+    adminUserId: string,
+  ) {
+    const txn = await this.prisma.transactions.findUnique({ where: { id } });
+    if (!txn) throw new NotFoundException(`Payment ${id} not found.`);
+
+    const updated = await this.prisma.transactions.update({
+      where: { id },
+      data: { status: dto.status, updatedAt: new Date() },
+    });
+
+    await this.prisma.admin_activity_log.create({
+      data: {
+        user_id:       adminUserId,
+        activity:      `Updated payment status: ${id} → ${dto.status}`,
+        activity_type: 'PAYMENT_STATUS_UPDATE',
+        details:       `Payment ${txn.reference} status changed to ${dto.status}`,
+        metadata:      {
+          paymentId: id,
+          reference: txn.reference,
+          previousStatus: txn.status,
+          newStatus: dto.status,
+        },
+      },
+    });
+
+    return updated;
+  }
+
+  async deletePayment(id: string, adminUserId: string) {
+    const txn = await this.prisma.transactions.findUnique({ where: { id } });
+    if (!txn) throw new NotFoundException(`Payment ${id} not found.`);
+
+    await this.prisma.transactions.delete({ where: { id } });
+
+    await this.prisma.admin_activity_log.create({
+      data: {
+        user_id:       adminUserId,
+        activity:      `Deleted payment: ${txn.reference}`,
+        activity_type: 'PAYMENT_DELETE',
+        details:       `Payment ${txn.reference} (₦/${txn.currency} ${txn.amount}) deleted`,
+        metadata:      {
+          paymentId: id,
+          reference: txn.reference,
+          amount: txn.amount,
+        },
+      },
+    });
+
+    return { message: `Payment ${txn.reference} has been deleted.` };
+  }
+
+  // ── Attendees ───────────────────────────────────────────────────────────────
+
+  async getAttendees(filters: {
+    search?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const page  = Math.max(1, filters.page  ?? 1);
+    const limit = Math.min(100, filters.limit ?? 20);
+    const skip  = (page - 1) * limit;
+
+    const where: Record<string, unknown> = {};
+
+    if (filters.search) {
+      where.OR = [
+        { firstName: { contains: filters.search, mode: 'insensitive' } },
+        { lastName:  { contains: filters.search, mode: 'insensitive' } },
+        { email:     { contains: filters.search, mode: 'insensitive' } },
+        { city:      { contains: filters.search, mode: 'insensitive' } },
+        { state:     { contains: filters.search, mode: 'insensitive' } },
+        { country:   { contains: filters.search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [attendees, total] = await Promise.all([
+      this.prisma.attendees.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+        include: {
+          _count: { select: { orders: true, transactions: true } },
+        },
+      }),
+      this.prisma.attendees.count({ where }),
+    ]);
+
+    return {
+      data: attendees,
+      meta: { total, page, limit, pages: Math.ceil(total / limit) },
+    };
+  }
+
+  async deleteAttendee(id: string, adminUserId: string) {
+    const attendee = await this.prisma.attendees.findUnique({ where: { id } });
+    if (!attendee) throw new NotFoundException(`Attendee ${id} not found.`);
+
+    await this.prisma.$transaction([
+      this.prisma.transactions.deleteMany({ where: { attendeeId: id } }),
+      this.prisma.orders.updateMany({
+        where: { attendeeId: id },
+        data: { attendeeId: null },
+      }),
+      this.prisma.attendees.delete({ where: { id } }),
+    ]);
+
+    await this.prisma.admin_activity_log.create({
+      data: {
+        user_id:       adminUserId,
+        activity:      `Deleted attendee: ${attendee.email}`,
+        activity_type: 'ATTENDEE_DELETE',
+        details:       `${attendee.firstName} ${attendee.lastName} (${attendee.email}) deleted`,
+        metadata:      { attendeeId: id, email: attendee.email },
+      },
+    });
+
+    return { message: `Attendee ${attendee.email} has been deleted.` };
   }
 
   // ── Activity log ────────────────────────────────────────────────────────────
