@@ -76,9 +76,10 @@ export class OrdersService {
         },
       });
 
+      const orderId = randomUUID();
       const order = await this.prisma.orders.create({
         data: {
-          id:              randomUUID(),
+          id:              orderId,
           fullName,
           email:           dto.email,
           phone:           dto.phone,
@@ -91,7 +92,22 @@ export class OrdersService {
           deliveryState:   dto.deliveryState,
           paymentRef:      dto.paymentRef,
           attendeeId:      attendee.id,
+          status:          order_status.awaiting_payment,
           updatedAt:       new Date(),
+        },
+      });
+
+      // Payment stays PENDING until an admin verifies it — receipt alone is not success.
+      await this.prisma.transactions.create({
+        data: {
+          id:         randomUUID(),
+          attendeeId: attendee.id,
+          orderId:    order.id,
+          amount:     totalPrice,
+          currency:   'GBP',
+          reference:  dto.paymentRef ?? `REF-${orderId}`,
+          status:     'PENDING',
+          updatedAt:  new Date(),
         },
       });
 
@@ -143,25 +159,44 @@ export class OrdersService {
 
     const updated = await this.prisma.orders.update({
       where: { id: params.orderId },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      data:  { receiptUrl, status: 'payment_proof_received' as any },
+      data:  {
+        receiptUrl,
+        status: order_status.payment_proof_received,
+      },
       include: { attendees: true },
     });
 
+    // Receipt uploaded → payment proof received, but payment remains PENDING until verified.
     if (order.attendeeId) {
-      await this.prisma.transactions.create({
-        data: {
-          id:         randomUUID(),
-          attendeeId: order.attendeeId,
-          orderId:    order.id,
-          amount:     order.totalPrice,
-          currency:   'GBP',
-          reference:  order.paymentRef ?? `REF-${randomUUID()}`,
-          status:     'SUCCESS',
-          receiptUrl,
-          updatedAt:  new Date(),
-        },
+      const existingTxn = await this.prisma.transactions.findFirst({
+        where: { orderId: order.id },
+        orderBy: { createdAt: 'desc' },
       });
+
+      if (existingTxn) {
+        await this.prisma.transactions.update({
+          where: { id: existingTxn.id },
+          data: {
+            receiptUrl,
+            status: existingTxn.status === 'SUCCESS' ? 'SUCCESS' : 'PENDING',
+            updatedAt: new Date(),
+          },
+        });
+      } else {
+        await this.prisma.transactions.create({
+          data: {
+            id:         randomUUID(),
+            attendeeId: order.attendeeId,
+            orderId:    order.id,
+            amount:     order.totalPrice,
+            currency:   'GBP',
+            reference:  order.paymentRef ?? `REF-${randomUUID()}`,
+            status:     'PENDING',
+            receiptUrl,
+            updatedAt:  new Date(),
+          },
+        });
+      }
     }
 
     // Await emails before returning — fire-and-forget gets killed on Vercel

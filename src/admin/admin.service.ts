@@ -12,7 +12,7 @@ import { InviteAdminDto } from './dto/invite-admin.dto.js';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto.js';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto.js';
 import { UpdateAdminRoleDto } from './dto/update-admin-role.dto.js';
-import { role } from '@prisma/client';
+import { order_status, role } from '@prisma/client';
 import { randomUUID } from 'crypto';
 
 @Injectable()
@@ -326,13 +326,29 @@ export class AdminService {
   }
 
   async updateOrderStatus(id: string, dto: UpdateOrderStatusDto, adminUserId: string) {
-    const order = await this.prisma.orders.findUnique({ where: { id } });
+    const order = await this.prisma.orders.findUnique({
+      where: { id },
+      include: { transactions: true },
+    });
     if (!order) throw new NotFoundException(`Order ${id} not found.`);
 
-    const updated = await this.prisma.orders.update({
-      where: { id },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      data:  { status: dto.status as any },
+    const paymentStatus = this.paymentStatusForOrderStatus(dto.status, !!order.receiptUrl);
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const nextOrder = await tx.orders.update({
+        where: { id },
+        data: { status: dto.status },
+        include: { attendees: true, transactions: true },
+      });
+
+      if (paymentStatus) {
+        await tx.transactions.updateMany({
+          where: { orderId: id },
+          data: { status: paymentStatus, updatedAt: new Date() },
+        });
+      }
+
+      return nextOrder;
     });
 
     await this.prisma.admin_activity_log.create({
@@ -340,12 +356,37 @@ export class AdminService {
         user_id:       adminUserId,
         activity:      `Updated order status: ${id} → ${dto.status}`,
         activity_type: 'ORDER_STATUS_UPDATE',
-        details:       `Order ${id} status changed to ${dto.status}`,
-        metadata:      { orderId: id, newStatus: dto.status },
+        details:       `Order ${id} status changed to ${dto.status}${
+          paymentStatus ? `; payment → ${paymentStatus}` : ''
+        }`,
+        metadata:      {
+          orderId: id,
+          newStatus: dto.status,
+          paymentStatus,
+        },
       },
     });
 
-    return updated;
+    return this.getOrderById(id);
+  }
+
+  /** Keep payment status aligned with the business rules for order status. */
+  private paymentStatusForOrderStatus(
+    status: string,
+    hasReceipt: boolean,
+  ): 'PENDING' | 'SUCCESS' | 'FAILED' | null {
+    if (status === 'payment_verified') return 'SUCCESS';
+    if (status === 'cancelled') return 'FAILED';
+    if (
+      status === 'awaiting_payment' ||
+      status === 'payment_proof_received' ||
+      status === 'new'
+    ) {
+      return 'PENDING';
+    }
+    // Other fulfilment statuses: leave payment alone unless never verified
+    if (!hasReceipt) return 'PENDING';
+    return null;
   }
 
   async deleteOrder(id: string, adminUserId: string) {
@@ -418,12 +459,29 @@ export class AdminService {
     dto: UpdatePaymentStatusDto,
     adminUserId: string,
   ) {
-    const txn = await this.prisma.transactions.findUnique({ where: { id } });
+    const txn = await this.prisma.transactions.findUnique({
+      where: { id },
+      include: { orders: true },
+    });
     if (!txn) throw new NotFoundException(`Payment ${id} not found.`);
 
-    const updated = await this.prisma.transactions.update({
-      where: { id },
-      data: { status: dto.status, updatedAt: new Date() },
+    const orderStatus = this.orderStatusForPaymentStatus(
+      dto.status,
+      !!txn.orders?.receiptUrl || !!txn.receiptUrl,
+    );
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.transactions.update({
+        where: { id },
+        data: { status: dto.status, updatedAt: new Date() },
+      });
+
+      if (txn.orderId && orderStatus) {
+        await tx.orders.update({
+          where: { id: txn.orderId },
+          data: { status: orderStatus },
+        });
+      }
     });
 
     await this.prisma.admin_activity_log.create({
@@ -431,17 +489,48 @@ export class AdminService {
         user_id:       adminUserId,
         activity:      `Updated payment status: ${id} → ${dto.status}`,
         activity_type: 'PAYMENT_STATUS_UPDATE',
-        details:       `Payment ${txn.reference} status changed to ${dto.status}`,
+        details:       `Payment ${txn.reference} status changed to ${dto.status}${
+          orderStatus ? `; order → ${orderStatus}` : ''
+        }`,
         metadata:      {
           paymentId: id,
           reference: txn.reference,
           previousStatus: txn.status,
           newStatus: dto.status,
+          orderStatus,
         },
       },
     });
 
-    return updated;
+    return this.getPaymentById(id);
+  }
+
+  private orderStatusForPaymentStatus(
+    paymentStatus: string,
+    hasReceipt: boolean,
+  ): order_status | null {
+    if (paymentStatus === 'SUCCESS') return order_status.payment_verified;
+    if (paymentStatus === 'FAILED') return order_status.cancelled;
+    if (paymentStatus === 'PENDING') {
+      return hasReceipt
+        ? order_status.payment_proof_received
+        : order_status.awaiting_payment;
+    }
+    return null;
+  }
+
+  async getPaymentById(id: string) {
+    const txn = await this.prisma.transactions.findUnique({
+      where: { id },
+      include: {
+        attendees: true,
+        orders: {
+          include: { attendees: true, transactions: true },
+        },
+      },
+    });
+    if (!txn) throw new NotFoundException(`Payment ${id} not found.`);
+    return txn;
   }
 
   async deletePayment(id: string, adminUserId: string) {
@@ -562,8 +651,18 @@ export class AdminService {
       successTransactions,
     ] = await Promise.all([
       this.prisma.orders.count(),
-      this.prisma.orders.count({ where: { status: 'new' as any } }),
-      this.prisma.orders.count({ where: { status: 'payment_verified' as any } }),
+      this.prisma.orders.count({
+        where: {
+          status: {
+            in: [
+              order_status.new,
+              order_status.awaiting_payment,
+              order_status.payment_proof_received,
+            ],
+          },
+        },
+      }),
+      this.prisma.orders.count({ where: { status: order_status.payment_verified } }),
       this.prisma.transactions.count(),
       this.prisma.transactions.count({ where: { status: 'PENDING' } }),
       this.prisma.transactions.count({ where: { status: 'SUCCESS' } }),
