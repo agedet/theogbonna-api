@@ -168,6 +168,13 @@ export class AdminController {
     return this.adminService.getPayments({ status, search, page, limit });
   }
 
+  @Get('payments/:id')
+  @Roles(role.admin, role.super_admin)
+  @ApiOperation({ summary: 'Get a single payment by ID' })
+  getPayment(@Param('id') id: string) {
+    return this.adminService.getPaymentById(id);
+  }
+
   @Patch('payments/:id/status')
   @Roles(role.admin, role.super_admin)
   @ApiOperation({ summary: 'Update payment status' })
