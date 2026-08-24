@@ -12,6 +12,12 @@ import { delivery_option, order_status } from '@prisma/client';
 import { randomUUID } from 'crypto';
 
 const UNIT_PRICE_GBP = 100;
+
+/** Per-product unit prices in GBP */
+const PRODUCT_PRICES: Record<string, number> = {
+  WOMENS_ASOEBI: 100,
+  MENS_ASOEBI:   10,
+};
 const HOST_PHONE     = '447958198281'; // WhatsApp host number (no +)
 const HOST_EMAIL     = process.env.HOST_EMAIL ?? '';
 
@@ -52,7 +58,8 @@ export class OrdersService {
     }
 
     const deliveryFee = DELIVERY_FEES[dto.deliveryOption] ?? 0;
-    const totalPrice  = dto.quantity * UNIT_PRICE_GBP + deliveryFee;
+    const unitPrice   = PRODUCT_PRICES[dto.productType ?? ''] ?? UNIT_PRICE_GBP;
+    const totalPrice  = dto.quantity * unitPrice + deliveryFee;
 
     // Compose fullName for the orders table from the two separate fields
     const firstName = dto.firstName.trim();
@@ -85,7 +92,7 @@ export class OrdersService {
           phone:           dto.phone,
           whatsapp:        dto.whatsapp,
           quantity:        dto.quantity,
-          unitPrice:       UNIT_PRICE_GBP,
+          unitPrice:       unitPrice,
           totalPrice,
           deliveryOption:  dto.deliveryOption,
           deliveryAddress: dto.deliveryAddress,

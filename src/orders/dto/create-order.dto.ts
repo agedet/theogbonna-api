@@ -48,4 +48,9 @@ export class CreateOrderDto {
   @IsOptional()
   @IsString()
   paymentRef?: string;
+
+  /** Product type determines unit price. Defaults to womens asoebi if not sent. */
+  @IsOptional()
+  @IsString()
+  productType?: string;
 }
