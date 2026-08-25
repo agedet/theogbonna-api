@@ -89,6 +89,16 @@ export class AdminController {
     return this.adminService.getActivityLog(limit);
   }
 
+  @Patch('attendees/:id/soft-delete')
+  @Roles(role.admin, role.super_admin)
+  @ApiOperation({ summary: 'Archive (soft-delete) an attendee' })
+  softDeleteAttendee(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.adminService.softDeleteAttendee(id, user.id);
+  }
+
   @Delete('attendees/:id')
   @Roles(role.super_admin)
   @ApiOperation({ summary: 'Super-admin: delete an attendee' })
@@ -142,6 +152,16 @@ export class AdminController {
     return this.adminService.updateOrderStatus(id, dto, user.id);
   }
 
+  @Patch('orders/:id/soft-delete')
+  @Roles(role.admin, role.super_admin)
+  @ApiOperation({ summary: 'Archive (soft-delete) an order' })
+  softDeleteOrder(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.adminService.softDeleteOrder(id, user.id);
+  }
+
   @Delete('orders/:id')
   @Roles(role.super_admin)
   @ApiOperation({ summary: 'Super-admin: delete an order' })
@@ -184,6 +204,16 @@ export class AdminController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.adminService.updatePaymentStatus(id, dto, user.id);
+  }
+
+  @Patch('payments/:id/soft-delete')
+  @Roles(role.admin, role.super_admin)
+  @ApiOperation({ summary: 'Archive (soft-delete) a payment' })
+  softDeletePayment(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.adminService.softDeletePayment(id, user.id);
   }
 
   @Delete('payments/:id')

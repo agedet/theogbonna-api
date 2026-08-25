@@ -280,18 +280,16 @@ export class AdminService {
     const limit = Math.min(100, filters.limit ?? 20);
     const skip  = (page - 1) * limit;
 
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = { deletedAt: null };
 
-    if (filters.status) {
-      where.status = filters.status;
-    }
+    if (filters.status) where.status = filters.status;
 
     if (filters.search) {
       where.OR = [
-        { fullName:  { contains: filters.search, mode: 'insensitive' } },
-        { email:     { contains: filters.search, mode: 'insensitive' } },
-        { phone:     { contains: filters.search, mode: 'insensitive' } },
-        { paymentRef:{ contains: filters.search, mode: 'insensitive' } },
+        { fullName:   { contains: filters.search, mode: 'insensitive' } },
+        { email:      { contains: filters.search, mode: 'insensitive' } },
+        { phone:      { contains: filters.search, mode: 'insensitive' } },
+        { paymentRef: { contains: filters.search, mode: 'insensitive' } },
       ];
     }
 
@@ -389,6 +387,29 @@ export class AdminService {
     return null;
   }
 
+  async softDeleteOrder(id: string, adminUserId: string) {
+    const order = await this.prisma.orders.findUnique({ where: { id } });
+    if (!order) throw new NotFoundException(`Order ${id} not found.`);
+    if (order.deletedAt) throw new BadRequestException(`Order ${id} is already archived.`);
+
+    await this.prisma.orders.update({
+      where: { id },
+      data:  { deletedAt: new Date() },
+    });
+
+    await this.prisma.admin_activity_log.create({
+      data: {
+        user_id:       adminUserId,
+        activity:      `Archived order: ${id}`,
+        activity_type: 'ORDER_SOFT_DELETE',
+        details:       `Order for ${order.fullName} (${order.email}) archived`,
+        metadata:      { orderId: id, email: order.email },
+      },
+    });
+
+    return { message: `Order ${id} has been archived.` };
+  }
+
   async deleteOrder(id: string, adminUserId: string) {
     const order = await this.prisma.orders.findUnique({ where: { id } });
     if (!order) throw new NotFoundException(`Order ${id} not found.`);
@@ -423,7 +444,7 @@ export class AdminService {
     const limit = Math.min(100, filters.limit ?? 20);
     const skip  = (page - 1) * limit;
 
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = { deletedAt: null };
 
     if (filters.status) where.status = filters.status;
 
@@ -533,6 +554,29 @@ export class AdminService {
     return txn;
   }
 
+  async softDeletePayment(id: string, adminUserId: string) {
+    const txn = await this.prisma.transactions.findUnique({ where: { id } });
+    if (!txn) throw new NotFoundException(`Payment ${id} not found.`);
+    if (txn.deletedAt) throw new BadRequestException(`Payment ${id} is already archived.`);
+
+    await this.prisma.transactions.update({
+      where: { id },
+      data:  { deletedAt: new Date() },
+    });
+
+    await this.prisma.admin_activity_log.create({
+      data: {
+        user_id:       adminUserId,
+        activity:      `Archived payment: ${txn.reference}`,
+        activity_type: 'PAYMENT_SOFT_DELETE',
+        details:       `Payment ${txn.reference} archived`,
+        metadata:      { paymentId: id, reference: txn.reference, amount: txn.amount },
+      },
+    });
+
+    return { message: `Payment ${txn.reference} has been archived.` };
+  }
+
   async deletePayment(id: string, adminUserId: string) {
     const txn = await this.prisma.transactions.findUnique({ where: { id } });
     if (!txn) throw new NotFoundException(`Payment ${id} not found.`);
@@ -567,7 +611,7 @@ export class AdminService {
     const limit = Math.min(100, filters.limit ?? 20);
     const skip  = (page - 1) * limit;
 
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = { deletedAt: null };
 
     if (filters.search) {
       where.OR = [
@@ -597,6 +641,29 @@ export class AdminService {
       data: attendees,
       meta: { total, page, limit, pages: Math.ceil(total / limit) },
     };
+  }
+
+  async softDeleteAttendee(id: string, adminUserId: string) {
+    const attendee = await this.prisma.attendees.findUnique({ where: { id } });
+    if (!attendee) throw new NotFoundException(`Attendee ${id} not found.`);
+    if (attendee.deletedAt) throw new BadRequestException(`Attendee ${id} is already archived.`);
+
+    await this.prisma.attendees.update({
+      where: { id },
+      data:  { deletedAt: new Date() },
+    });
+
+    await this.prisma.admin_activity_log.create({
+      data: {
+        user_id:       adminUserId,
+        activity:      `Archived attendee: ${attendee.email}`,
+        activity_type: 'ATTENDEE_SOFT_DELETE',
+        details:       `${attendee.firstName} ${attendee.lastName} (${attendee.email}) archived`,
+        metadata:      { attendeeId: id, email: attendee.email },
+      },
+    });
+
+    return { message: `Attendee ${attendee.email} has been archived.` };
   }
 
   async deleteAttendee(id: string, adminUserId: string) {

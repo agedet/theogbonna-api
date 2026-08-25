@@ -509,6 +509,7 @@ model attendees {
   country         String
   deliveryAddress String
   createdAt       DateTime       @default(now())
+  deletedAt       DateTime?
   orders          orders[]
   transactions    transactions[]
 
@@ -533,6 +534,7 @@ model orders {
   attendeeId      String?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime
+  deletedAt       DateTime?
   attendees       attendees?      @relation(fields: [attendeeId], references: [id])
   transactions    transactions[]
 
@@ -550,6 +552,7 @@ model transactions {
   receiptUrl String?
   createdAt  DateTime  @default(now())
   updatedAt  DateTime
+  deletedAt  DateTime?
   attendees  attendees @relation(fields: [attendeeId], references: [id])
   orders     orders?   @relation(fields: [orderId], references: [id])
 
